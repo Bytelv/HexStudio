@@ -110,12 +110,12 @@ fun MainNavHost(
                     container = container,
                     startNew = startNew,
                     onOpenEditor = { path ->
-                        navController.navigate("editor/${Uri.encode(path)}")
+                        navController.navigate("editor?path=${Uri.encode(path)}")
                     }
                 )
             }
             composable(
-                route = "editor/{path}",
+                route = "editor?path={path}",
                 arguments = listOf(navArgument("path") { type = NavType.StringType })
             ) { entry ->
                 val path = Uri.decode(entry.arguments?.getString("path") ?: "")

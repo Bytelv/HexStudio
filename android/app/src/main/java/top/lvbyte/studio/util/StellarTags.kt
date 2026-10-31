@@ -92,7 +92,11 @@ object StellarTags {
     fun validate(body: String, frontMatterFields: Map<String, String>): List<String> {
         val issues = mutableListOf<String>()
         val stack = mutableListOf<String>()
-        tagRegex.findAll(body).forEach { match ->
+        // 代码块里的标签是示例文本，不参与闭合校验
+        val sanitized = body
+            .replace(Regex("""```[\s\S]*?```"""), "")
+            .replace(Regex("`[^`\n]*`"), "")
+        tagRegex.findAll(sanitized).forEach { match ->
             val name = match.groupValues[1].lowercase()
             if (name == "about") {
                 issues += "Stellar v2 已移除 {% about %} 标签，构建会直接失败"
