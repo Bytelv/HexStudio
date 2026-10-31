@@ -17,7 +17,7 @@ android {
         versionName = "1.0.0"
 
         buildConfigField("String", "DEFAULT_API_BASE", "\"https://studio.4123010.xyz\"")
-        buildConfigField("String", "GITHUB_CLIENT_ID", "\"\"")
+        buildConfigField("String", "GITHUB_CLIENT_ID", "\"Ov23lizGC0TUk86kapjg\"")
     }
 
     buildTypes {

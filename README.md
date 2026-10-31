@@ -68,13 +68,15 @@ Worker 的 `ADMIN_GITHUB_LOGIN` 为 `Bytelv`；只有这个 GitHub 账号能换�
 
 ---
 
-## 3. 必须先做：创建 GitHub OAuth App
+## 3. GitHub OAuth App（已配置 Device Flow）
 
 Device Flow 只需要 **Client ID**，不需要 Client Secret。
 
+当前 APK 已内置 Client ID：`Ov23lizGC0TUk86kapjg`（已实际请求过 GitHub 设备码验证通过）。登录页点「使用 GitHub 登录」即可；如果想换成自己的 OAuth App，在登录页「高级设置」覆盖即可。
+
 1. GitHub → Settings → Developer settings → **OAuth Apps** → New OAuth App。
 2. 填写：
-   - Application name：`Lvbyte Studio`
+   - Application name：`HexStudio`
    - Homepage URL：`https://blog.lvbyte.top`
    - Authorization callback URL：`https://blog.lvbyte.top/`（Device Flow 不使用，但表单必填）
 3. 创建后点 **Enable Device Flow**。
@@ -82,8 +84,8 @@ Device Flow 只需要 **Client ID**，不需要 Client Secret。
 
 然后二选一：
 
-- **不重新编译**：打开 APK 登录页 → 高级设置 → 填入 Client ID。它会存在本机 DataStore。
-- **写进安装包**：把 Client ID 填到 `android/app/build.gradle.kts` 的 `GITHUB_CLIENT_ID`，重新构建。
+- 写进安装包：`android/app/build.gradle.kts` 的 `GITHUB_CLIENT_ID`（当前已填）。
+- 不重新编译：登录页 → 高级设置 → 覆盖 Client ID，保存在本机 DataStore。
 
 > Client Secret 不要填进 App，也不要提交仓库；Device Flow 不需要它。
 
