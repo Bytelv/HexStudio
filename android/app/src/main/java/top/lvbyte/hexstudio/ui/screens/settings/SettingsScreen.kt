@@ -65,7 +65,9 @@ import top.lvbyte.hexstudio.ui.components.StatusPill
 fun SettingsScreen(
     container: AppContainer,
     onSwitchRepo: () -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    updateChecking: Boolean,
+    onCheckUpdate: () -> Unit
 ) {
     val vm: SettingsViewModel = viewModel(factory = appViewModelFactory { SettingsViewModel(container) })
     val state by vm.state.collectAsStateWithLifecycle()
@@ -299,7 +301,27 @@ fun SettingsScreen(
             }
             item {
                 SectionCard(title = "关于") {
-                    Text("HexStudio ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("HexStudio ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "启动时自动检查，也可以手动检查 GitHub 上的新版本",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        OutlinedButton(onClick = onCheckUpdate, enabled = !updateChecking) {
+                            if (updateChecking) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Text("检查更新")
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Text(
                         "GitHub 仓库管理 · Stellar 标签 · 图床 · Cloudflare 说说/友链",
                         style = MaterialTheme.typography.labelSmall,

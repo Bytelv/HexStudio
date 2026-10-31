@@ -1,5 +1,9 @@
 package top.lvbyte.hexstudio.ui.screens.talks
 
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.SolidColor
@@ -78,6 +82,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -115,13 +122,14 @@ fun TalksScreen(container: AppContainer) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text("说说", style = MaterialTheme.typography.titleLarge)
+                        Text("全部说说", style = MaterialTheme.typography.titleLarge)
                         Text(
-                            "即时记录",
+                            if (state.loading && state.talks.isEmpty()) "正在同步…" else "${state.talks.size} 条记录",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -134,20 +142,9 @@ fun TalksScreen(container: AppContainer) {
                     IconButton(onClick = vm::load) {
                         Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
                     }
-                }
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    editing = null
-                    showCompose = true
                 },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ) {
-                Icon(Icons.Outlined.Edit, contentDescription = "写说说")
-            }
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+            )
         },
         snackbarHost = { SnackbarHost(snackbar) }
     ) { padding ->
@@ -159,49 +156,39 @@ fun TalksScreen(container: AppContainer) {
                     modifier = Modifier.padding(16.dp),
                     onRetry = vm::load
                 )
-                else -> {
-                    if (state.talks.isEmpty()) {
-                        EmptyState(
-                            icon = Icons.Outlined.Image,
-                            title = "还没有说说",
-                            description = "发一条此刻的想法，网站会实时同步。",
-                            action = {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = {
-                                        editing = null
-                                        showCompose = true
-                                    }) { Text("发布第一条") }
-                                    TextButton(onClick = { showImport = true }) { Text("从 tgtalk 导入") }
-                                }
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp, end = 16.dp, top = 4.dp, bottom = 32.dp
+                    )
+                ) {
+                    item(key = "composer") {
+                        NenoComposerCard(
+                            onClick = {
+                                editing = null
+                                showCompose = true
                             }
                         )
+                    }
+                    if (state.talks.isEmpty()) {
+                        item(key = "empty") { NenoEmptyCard() }
                     } else {
-                        val groups = remember(state.talks) {
-                            state.talks.groupBy { TimeUtils.dayKey(it.createdAt) }
-                        }
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                                start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp
+                        items(state.talks, key = { it.id }) { talk ->
+                            NenoTalkItem(
+                                talk = talk,
+                                onEdit = {
+                                    editing = talk
+                                    showCompose = true
+                                },
+                                onDelete = { toDelete = talk },
+                                onImageClick = { previewImage = it }
                             )
-                        ) {
-                            groups.forEach { (_, talks) ->
-                                item(key = "day-${talks.first().id}") {
-                                    DayHeader(talks.first().createdAt)
-                                }
-                                items(talks, key = { it.id }) { talk ->
-                                    TalkCard(
-                                        talk = talk,
-                                        onEdit = {
-                                            editing = talk
-                                            showCompose = true
-                                        },
-                                        onDelete = { toDelete = talk },
-                                        onImageClick = { previewImage = it }
-                                    )
-                                }
-                            }
+                        }
+                    }
+                    if (!state.error.isNullOrBlank()) {
+                        item(key = "list-error") {
+                            ErrorCard(state.error ?: "", onRetry = vm::load)
                         }
                     }
                 }
@@ -275,111 +262,176 @@ fun TalksScreen(container: AppContainer) {
     }
 }
 
+private val NenoGreen = Color(0xFF2F9E6B)
+private val NenoGreenDark = Color(0xFF5FD3A1)
+private val NenoHashtag = Regex("""(^|[\s(\[（])#([\p{L}\p{N}_-]{1,30})""")
+
 @Composable
-private fun DayHeader(timestamp: Long) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            TimeUtils.dayLabel(timestamp),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.width(5.dp))
-        Text(
-            TimeUtils.weekdayLabel(timestamp),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-        )
-        Spacer(Modifier.weight(1f))
-        Box(
-            Modifier
-                .weight(1f)
-                .height(1.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant)
-        )
+private fun nenoAccent(): Color = if (isSystemInDarkTheme()) NenoGreenDark else NenoGreen
+
+@Composable
+private fun nenoOnAccent(): Color = if (isSystemInDarkTheme()) Color(0xFF06281A) else Color.White
+
+@Composable
+private fun nenoHighlight(content: String): AnnotatedString {
+    val accent = nenoAccent()
+    return remember(content, accent) {
+        buildAnnotatedString {
+            append(content)
+            NenoHashtag.findAll(content).forEach { match ->
+                val start = match.range.first + match.groupValues[1].length
+                addStyle(
+                    SpanStyle(color = accent, fontWeight = FontWeight.Medium),
+                    start,
+                    match.range.last + 1
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun TalkCard(
+private fun NenoComposerCard(onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 2.dp
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                "现在的想法是…",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f)
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Outlined.Tag,
+                    contentDescription = null,
+                    tint = nenoAccent(),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(14.dp))
+                Icon(
+                    Icons.Outlined.Image,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.weight(1f))
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = nenoAccent()
+                ) {
+                    Text(
+                        "写说说",
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = nenoOnAccent()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NenoEmptyCard() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("还没有说说", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "点上面的输入框，记下此刻。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun NenoTalkItem(
     talk: Talk,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onImageClick: (String) -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(
-                1.dp,
-                MaterialTheme.colorScheme.outlineVariant,
-                RoundedCornerShape(16.dp)
-            ),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface
-    ) {
-        Column(Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    TimeUtils.timeLabel(talk.createdAt),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.weight(1f))
-                Box {
-                    IconButton(onClick = { menu = true }, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            Icons.Outlined.MoreVert,
-                            contentDescription = "更多",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("编辑") },
-                            leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
-                            onClick = {
-                                menu = false
-                                onEdit()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("删除") },
-                            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
-                            onClick = {
-                                menu = false
-                                onDelete()
-                            }
-                        )
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            talk.created.ifBlank { TimeUtils.dateTime(talk.createdAt) },
+            modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 1.dp
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        nenoHighlight(talk.content),
+                        modifier = Modifier.weight(1f).padding(top = 4.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Box {
+                        IconButton(onClick = { menu = true }, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                Icons.Outlined.MoreVert,
+                                contentDescription = "更多",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("编辑") },
+                                leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
+                                onClick = {
+                                    menu = false
+                                    onEdit()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("删除") },
+                                leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) },
+                                onClick = {
+                                    menu = false
+                                    onDelete()
+                                }
+                            )
+                        }
                     }
                 }
-            }
-            Text(
-                talk.content,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            if (talk.images.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                TalkImages(talk.images, onImageClick)
-            }
-            if (talk.tags.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    talk.tags.take(6).forEach { tag ->
-                        Surface(
-                            shape = RoundedCornerShape(999.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-                        ) {
+                if (talk.images.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    TalkImages(talk.images, onImageClick)
+                }
+                val extraTags = talk.tags.filter { "#$it" !in talk.content }
+                if (extraTags.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        extraTags.take(6).forEach { tag ->
                             Text(
                                 "#$tag",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
+                                style = MaterialTheme.typography.labelMedium,
+                                color = nenoAccent()
                             )
                         }
                     }
@@ -445,6 +497,8 @@ private fun TalkComposeDialog(
     val dateLabel = remember(timestamp) {
         TimeUtils.dayLabel(timestamp) + " " + TimeUtils.weekdayLabel(timestamp)
     }
+    val accent = nenoAccent()
+    val onAccent = nenoOnAccent()
 
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(9)
@@ -516,13 +570,17 @@ private fun TalkComposeDialog(
                     Button(
                         enabled = content.isNotBlank() && !busy,
                         onClick = ::submit,
-                        shape = RoundedCornerShape(999.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = accent,
+                            contentColor = onAccent
+                        )
                     ) {
                         if (busy) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
                                 strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
+                                color = onAccent
                             )
                         } else {
                             Text(if (editing == null) "发布" else "保存")
@@ -535,9 +593,16 @@ private fun TalkComposeDialog(
                     modifier = Modifier
                         .weight(1f)
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp, vertical = 16.dp)
+                        .padding(horizontal = 16.dp, vertical = 16.dp)
                         .imePadding()
                 ) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = 2.dp
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
                     BasicTextField(
                         value = content,
                         onValueChange = { value ->
@@ -552,12 +617,12 @@ private fun TalkComposeDialog(
                             lineHeight = 28.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        cursorBrush = SolidColor(accent),
                         decorationBox = { inner ->
                             Box {
                                 if (content.isEmpty()) {
                                     Text(
-                                        "写点什么…",
+                                        "现在的想法是…",
                                         fontSize = 17.sp,
                                         lineHeight = 28.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
@@ -584,20 +649,14 @@ private fun TalkComposeDialog(
                         Spacer(Modifier.height(10.dp))
                         Row(
                             modifier = Modifier.horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             tags.take(8).forEach { tag ->
-                                Surface(
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-                                ) {
-                                    Text(
-                                        "#$tag",
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
+                                Text(
+                                    "#$tag",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = accent
+                                )
                             }
                         }
                     }
@@ -680,6 +739,8 @@ private fun TalkComposeDialog(
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
+                        }
+                    }
                 }
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -707,7 +768,7 @@ private fun TalkComposeDialog(
                             focusRequester.requestFocus()
                         }
                     ) {
-                        Icon(Icons.Outlined.Tag, contentDescription = "插入标签")
+                        Icon(Icons.Outlined.Tag, contentDescription = "插入标签", tint = accent)
                     }
                     Spacer(Modifier.weight(1f))
                     Text(

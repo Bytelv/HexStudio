@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import top.lvbyte.hexstudio.core.AppContainer
+import top.lvbyte.hexstudio.ui.components.UpdateHost
 import top.lvbyte.hexstudio.ui.screens.login.LoginScreen
 import top.lvbyte.hexstudio.ui.screens.repo.RepoPickerScreen
 
@@ -27,6 +28,8 @@ import top.lvbyte.hexstudio.ui.screens.repo.RepoPickerScreen
 fun StudioRoot(container: AppContainer) {
     val appVm: AppViewModel = viewModel(factory = appViewModelFactory { AppViewModel(container) })
     val gate by appVm.gate.collectAsStateWithLifecycle()
+    val updateVm: UpdateViewModel = viewModel(factory = appViewModelFactory { UpdateViewModel(container) })
+    val updateState by updateVm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -35,6 +38,7 @@ fun StudioRoot(container: AppContainer) {
     LaunchedEffect(gate) {
         if (gate == Gate.Ready) {
             top.lvbyte.hexstudio.work.NotificationScheduler.pollNow(context)
+            updateVm.autoCheck()
             if (Build.VERSION.SDK_INT >= 33) {
                 val granted = ContextCompat.checkSelfPermission(
                     context,
@@ -63,8 +67,16 @@ fun StudioRoot(container: AppContainer) {
             Gate.Ready -> MainNavHost(
                 container = container,
                 onLogout = { appVm.logout() },
-                onRepoChanged = { appVm.refresh() }
+                onRepoChanged = { appVm.refresh() },
+                updateChecking = updateState.checking,
+                onCheckUpdate = updateVm::check
             )
         }
+        UpdateHost(
+            state = updateState,
+            onDismissResult = updateVm::dismissResult,
+            onDismissUpdate = updateVm::dismissUpdate,
+            onRetry = updateVm::retry
+        )
     }
 }

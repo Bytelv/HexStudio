@@ -22,11 +22,16 @@ android {
         applicationId = "top.lvbyte.hexstudio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
 
         buildConfigField("String", "DEFAULT_API_BASE", "\"https://studio.4123010.xyz\"")
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"Ov23lizGC0TUk86kapjg\"")
+        buildConfigField(
+            "String",
+            "UPDATE_MANIFEST_URL",
+            "\"https://raw.githubusercontent.com/Bytelv/HexStudio/main/update.json\""
+        )
     }
 
     signingConfigs {

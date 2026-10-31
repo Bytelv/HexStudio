@@ -62,8 +62,9 @@ Worker 的 `ADMIN_GITHUB_LOGIN` 为 `Bytelv`；只有这个 GitHub 账号能换�
 - 文章/页面/配置浏览与 Markdown 编辑，front-matter 属性编辑。
 - Stellar 标签插入面板、闭合校验、离线 HTML 预览（marked + DOMPurify）。
 - 图床 API 上传（HTTP Basic），支持 Markdown 或 `{% image %}` 插入。
-- 说说：flomo 式极简编辑页 + 卡片流、发布/编辑/删除、tgtalk JSON 导入（可选图片转存）。
+- 说说：NENO 风格卡片流（顶部输入卡片、卡片外时间、绿色标签）+ 极简编辑页、发布/编辑/删除、tgtalk JSON 导入（可选图片转存）。
 - 友链：待审核、通过/拒绝、编辑、抓取状态、通知角标。
+- 更新检查：设置里手动检查，启动时静默检查（12 小时内只请求一次），有新版本弹窗直达 APK。
 - WorkManager 每 15 分钟轮询通知；打开 App 立即同步。
 
 ---
@@ -113,6 +114,15 @@ android/app/build/outputs/apk/release/app-release.apk  # R8 + 资源压缩，日
 ```
 
 Release 包使用本机 `android/keystore.properties`（已加入 .gitignore）签名；没有该文件时会回退 debug 签名。Release 的 applicationId 是 `top.lvbyte.hexstudio`，与 debug 的 `.debug` 后缀不同，首次安装需要重新登录。
+
+### 发布更新
+
+APK 从仓库根目录的 `update.json` 读取版本信息，更新地址指向 `release/HexStudio-<版本>.apk`。发布新版本时：
+
+1. 修改 `android/app/build.gradle.kts` 的 `versionCode` / `versionName`。
+2. 构建 release APK，复制到 `release/HexStudio-<version>.apk`。
+3. 更新根目录 `update.json` 里的 `versionCode`、`versionName`、`downloadUrl` 和 `changelog`。
+4. 提交并 push。已安装旧版的 App 会在设置页或下次启动时提示更新。
 
 ### 性能与缓存
 

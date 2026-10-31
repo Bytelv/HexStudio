@@ -53,7 +53,9 @@ private val navItems = listOf(
 fun MainNavHost(
     container: AppContainer,
     onLogout: () -> Unit,
-    onRepoChanged: () -> Unit
+    onRepoChanged: () -> Unit,
+    updateChecking: Boolean,
+    onCheckUpdate: () -> Unit
 ) {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
@@ -149,7 +151,9 @@ fun MainNavHost(
                 SettingsScreen(
                     container = container,
                     onSwitchRepo = { navController.navigate("repoSwitch") },
-                    onLogout = onLogout
+                    onLogout = onLogout,
+                    updateChecking = updateChecking,
+                    onCheckUpdate = onCheckUpdate
                 )
             }
             composable("repoSwitch") {
