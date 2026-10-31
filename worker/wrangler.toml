@@ -1,3 +1,4 @@
+# HexStudio worker（线上脚本名保留 lvbyte-studio-api）
 name = "lvbyte-studio-api"
 main = "src/index.js"
 compatibility_date = "2026-10-31"

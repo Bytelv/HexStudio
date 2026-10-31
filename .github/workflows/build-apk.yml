@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build HexStudio APK
 
 on:
   push:
@@ -43,6 +43,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: lvbyte-studio-debug-apk
+          name: hexstudio-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

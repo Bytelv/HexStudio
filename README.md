@@ -1,6 +1,8 @@
-# LvbyteStudio
+# HexStudio
 
 字节君的博客工作台：**Android APK + Cloudflare Worker/D1 + Hexo/Stellar 站点改造**。
+
+> 项目名已迁移为 **HexStudio**；线上 Worker/D1 资源名仍保留 `lvbyte-studio-*`，避免改变已经生效的 API 地址。
 
 用手機管理 `blog.lvbyte.top` 的 Hexo 源码、发布说说、审批友链，并让网站直接读取 Cloudflare 上的数据。
 

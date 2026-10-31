@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "top.lvbyte.studio"
+    namespace = "top.lvbyte.hexstudio"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "top.lvbyte.studio"
+        applicationId = "top.lvbyte.hexstudio"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

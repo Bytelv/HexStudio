@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "LvbyteStudio"
+rootProject.name = "HexStudio"
 include(":app")
