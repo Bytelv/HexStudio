@@ -1,6 +1,6 @@
 {
-  "versionCode": 4,
-  "versionName": "1.2.1",
-  "downloadUrl": "https://raw.githubusercontent.com/Bytelv/HexStudio/main/release/HexStudio-1.2.1.apk",
-  "changelog": "说说输入改为在当前页面直接展开，随文字增高，超过 7 行自动进入全屏编辑器。\n友链列表显示无法访问状态和检测原因。\n工作台继续修复朋友圈文章按真实发布时间排序。"
+  "versionCode": 5,
+  "versionName": "1.2.2",
+  "downloadUrl": "https://raw.githubusercontent.com/Bytelv/HexStudio/main/release/HexStudio-1.2.2.apk",
+  "changelog": "说说内联输入的图片按钮现在直接选图并上传，缩略图显示在输入框下方，不再跳转全屏。\n展开编辑器时会带上已输入的文字和图片；取消全屏会回到内联框继续编辑。"
 }

@@ -53,6 +53,7 @@ Worker 的 `ADMIN_GITHUB_LOGIN` 为 `Bytelv`；只有这个 GitHub 账号能换�
 - `source/friend/index.md`：友链 API 换成 Worker；申请表单改成自建表单。
 - `source/friend/rss/index.md`：朋友圈 API 换成 `/feeds`。
 - `source/talks/index.md`：普通时间线说说页（网站不采用 flomo 风格）。
+- `source/_data/widgets.yml`：首页侧边栏「近期说说」改为读取 Worker `/talks?limit=5`，不再依赖 tgtalk。
 - `source/timeline/index.html`：旧链接静态重定向到 `/talks/`。
 - 菜单位置「说说」、页脚、robots 已同步。
 
@@ -63,7 +64,7 @@ Worker 的 `ADMIN_GITHUB_LOGIN` 为 `Bytelv`；只有这个 GitHub 账号能换�
 - 文章/页面/配置浏览与 Markdown 编辑，front-matter 属性编辑。
 - Stellar 标签插入面板、闭合校验、离线 HTML 预览（marked + DOMPurify）。
 - 图床 API 上传（HTTP Basic），支持 Markdown 或 `{% image %}` 插入。
-- 说说：NENO 风格卡片流（点击顶部输入卡片在当前页展开，随字数增高，超过阈值淡入全屏编辑器）、发布/编辑/删除、tgtalk JSON 导入（可选图片转存）。
+- 说说：NENO 风格卡片流（点击顶部输入卡片在当前页展开，随字数增高，超过阈值淡入全屏编辑器；图片按钮直接选图上传并在内联框显示缩略图）、发布/编辑/删除、tgtalk JSON 导入（可选图片转存）。
 - 友链：待审核、通过/拒绝、编辑、抓取状态、存活状态（无法访问角标）、通知角标。
 - 更新检查：设置里手动检查，启动时静默检查（12 小时内只请求一次），有新版本弹窗直达 APK。
 - WorkManager 每 15 分钟轮询通知；打开 App 立即同步。

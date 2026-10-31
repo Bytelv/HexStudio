@@ -12,6 +12,7 @@ import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.mutableIntStateOf
+import android.net.Uri
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.SolidColor
@@ -128,7 +129,9 @@ fun TalksScreen(container: AppContainer) {
     var toDelete by remember { mutableStateOf<Talk?>(null) }
     var inlineActive by rememberSaveable { mutableStateOf(false) }
     val inlineText = rememberSaveable { mutableStateOf("") }
+    val inlineImages = remember { mutableStateOf(emptyList<String>()) }
     var composeSeed by rememberSaveable { mutableStateOf("") }
+    var composeSeedImages by remember { mutableStateOf(emptyList<String>()) }
     var inlineAllowExpand by rememberSaveable { mutableStateOf(true) }
     val listState = rememberLazyListState()
 
@@ -183,6 +186,7 @@ fun TalksScreen(container: AppContainer) {
                         NenoInlineComposer(
                             active = inlineActive,
                             textState = inlineText,
+                            imagesState = inlineImages,
                             allowAutoExpand = inlineAllowExpand,
                             onActivate = {
                                 inlineActive = true
@@ -194,13 +198,16 @@ fun TalksScreen(container: AppContainer) {
                             },
                             onExpand = {
                                 composeSeed = inlineText.value
+                                composeSeedImages = inlineImages.value
                                 inlineActive = false
                                 editing = null
                                 showCompose = true
                             },
-                            onPublish = { text -> vm.publish(text, emptyList(), null) },
+                            onUploadImages = { uris, onProgress -> vm.uploadImages(uris, onProgress) },
+                            onPublish = { text, images -> vm.publish(text, images, null) },
                             onPublished = {
                                 inlineText.value = ""
+                                inlineImages.value = emptyList()
                                 inlineActive = false
                                 inlineAllowExpand = true
                             }
@@ -237,17 +244,21 @@ fun TalksScreen(container: AppContainer) {
             vm = vm,
             editing = editing,
             initialContent = editing?.content ?: composeSeed,
-            initialImages = editing?.images ?: emptyList(),
-            onDismiss = { published, finalText ->
+            initialImages = editing?.images ?: composeSeedImages,
+            onDismiss = { published, finalText, finalImages ->
                 showCompose = false
                 if (published) {
                     inlineText.value = ""
+                    inlineImages.value = emptyList()
                     composeSeed = ""
+                    composeSeedImages = emptyList()
                     inlineActive = false
                     inlineAllowExpand = true
-                } else if (editing == null && finalText.isNotBlank()) {
+                } else if (editing == null && (finalText.isNotBlank() || finalImages.isNotEmpty())) {
                     inlineText.value = finalText
+                    inlineImages.value = finalImages
                     composeSeed = ""
+                    composeSeedImages = emptyList()
                     inlineActive = true
                     inlineAllowExpand = false
                 }
@@ -343,13 +354,16 @@ private fun nenoHighlight(content: String): AnnotatedString {
 private fun NenoInlineComposer(
     active: Boolean,
     textState: MutableState<String>,
+    imagesState: MutableState<List<String>>,
     allowAutoExpand: Boolean,
     onActivate: () -> Unit,
     onExpand: () -> Unit,
-    onPublish: suspend (String) -> String?,
+    onUploadImages: suspend (List<Uri>, (Int, Int, String) -> Unit) -> List<String>,
+    onPublish: suspend (String, List<String>) -> String?,
     onPublished: () -> Unit
 ) {
     val text = textState.value
+    val images = imagesState.value
     val accent = nenoAccent()
     val onAccent = nenoOnAccent()
     val scope = rememberCoroutineScope()
@@ -357,7 +371,27 @@ private fun NenoInlineComposer(
     val scrollState = rememberScrollState()
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var progress by remember { mutableStateOf("") }
     var lineCount by remember { mutableIntStateOf(1) }
+
+    val picker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(9)
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            busy = true
+            error = null
+            try {
+                val urls = onUploadImages(uris) { _, _, label -> progress = label }
+                imagesState.value = (imagesState.value + urls).take(9)
+            } catch (e: Exception) {
+                error = e.message ?: "图片上传失败"
+            } finally {
+                busy = false
+                progress = ""
+            }
+        }
+    }
 
     LaunchedEffect(active) {
         if (active) {
@@ -368,8 +402,8 @@ private fun NenoInlineComposer(
         }
     }
 
-    LaunchedEffect(active, allowAutoExpand, text, lineCount) {
-        if (!active || !allowAutoExpand || text.isBlank()) return@LaunchedEffect
+    LaunchedEffect(active, allowAutoExpand, text, lineCount, busy) {
+        if (!active || !allowAutoExpand || busy || text.isBlank()) return@LaunchedEffect
         if (lineCount > 7 || text.length > 320) {
             delay(180)
             onExpand()
@@ -382,10 +416,11 @@ private fun NenoInlineComposer(
         scope.launch {
             busy = true
             error = null
-            val err = onPublish(value)
+            val err = onPublish(value, imagesState.value)
             busy = false
             if (err == null) {
                 textState.value = ""
+                imagesState.value = emptyList()
                 onPublished()
             } else {
                 error = err
@@ -475,6 +510,56 @@ private fun NenoInlineComposer(
                         }
                     }
                 )
+                if (images.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        images.forEachIndexed { index, url ->
+                            Box(Modifier.size(68.dp)) {
+                                AsyncImage(
+                                    model = url,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(10.dp))
+                                )
+                                IconButton(
+                                    enabled = !busy,
+                                    onClick = {
+                                        imagesState.value = imagesState.value
+                                            .filterIndexed { i, _ -> i != index }
+                                    },
+                                    modifier = Modifier.align(Alignment.TopEnd).size(22.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Close,
+                                        contentDescription = "移除图片",
+                                        tint = Color.White,
+                                        modifier = Modifier
+                                            .background(
+                                                Color.Black.copy(alpha = 0.5f),
+                                                RoundedCornerShape(10.dp)
+                                            )
+                                            .padding(2.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if (progress.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        progress,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
@@ -494,8 +579,12 @@ private fun NenoInlineComposer(
                         )
                     }
                     IconButton(
-                        enabled = !busy,
-                        onClick = onExpand,
+                        enabled = !busy && images.size < 9,
+                        onClick = {
+                            picker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
                         modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
@@ -706,7 +795,7 @@ private fun TalkComposeDialog(
     editing: Talk?,
     initialContent: String,
     initialImages: List<String>,
-    onDismiss: (published: Boolean, finalContent: String) -> Unit
+    onDismiss: (published: Boolean, finalContent: String, finalImages: List<String>) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var content by rememberSaveable(editing?.id, initialContent) { mutableStateOf(initialContent) }
@@ -752,7 +841,7 @@ private fun TalkComposeDialog(
             error = null
             val err = vm.publish(content.trim(), images, editing?.id)
             busy = false
-            if (err == null) onDismiss(true, content) else error = err
+            if (err == null) onDismiss(true, content, images) else error = err
         }
     }
 
@@ -763,7 +852,7 @@ private fun TalkComposeDialog(
     }
 
     Dialog(
-        onDismissRequest = { if (!busy) onDismiss(false, content) },
+        onDismissRequest = { if (!busy) onDismiss(false, content, images) },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
         AnimatedVisibility(
@@ -786,7 +875,7 @@ private fun TalkComposeDialog(
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(enabled = !busy, onClick = { onDismiss(false, content) }) { Text("取消") }
+                    TextButton(enabled = !busy, onClick = { onDismiss(false, content, images) }) { Text("取消") }
                     Text(
                         dateLabel,
                         modifier = Modifier.weight(1f),
