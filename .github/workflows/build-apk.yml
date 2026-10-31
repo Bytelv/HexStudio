@@ -25,7 +25,10 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          # 显式跳过已下线的 legacy tools 包
+          packages: platform-tools
 
       - name: Install SDK platform 35
         run: yes | sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
