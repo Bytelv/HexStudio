@@ -1,0 +1,17 @@
+{
+  "name": "lvbyte-studio-api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/test-parser.mjs",
+    "dev": "wrangler dev",
+    "build": "esbuild src/index.js --bundle --format=esm --minify --outfile=dist/worker.js",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute lvbyte-studio-db --remote --file=./schema.sql"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "wrangler": "^4.42.0"
+  }
+}

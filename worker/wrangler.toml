@@ -1,0 +1,24 @@
+name = "lvbyte-studio-api"
+main = "src/index.js"
+compatibility_date = "2026-10-31"
+workers_dev = false
+
+[vars]
+SITE_URL = "https://blog.lvbyte.top"
+SITE_NAME = "字节君"
+ADMIN_GITHUB_LOGIN = "Bytelv"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "lvbyte-studio-db"
+database_id = "9670d6ee-b607-445d-bfad-e834383121e0"
+
+[[routes]]
+pattern = "studio.4123010.xyz/*"
+zone_name = "4123010.xyz"
+
+[triggers]
+crons = ["* * * * *"]
+
+[observability]
+enabled = true
