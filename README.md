@@ -43,6 +43,7 @@ Worker 的 `ADMIN_GITHUB_LOGIN` 为 `Bytelv`；只有这个 GitHub 账号能换�
 - **友链**：`/friends` 返回 Qexo v2 兼容结构，Stellar 的 `{% friends %}` 无需改渲染代码。
 - **申请**：`/friends/apply` 做蜜罐、URL 校验、按 IP 限流，写入 `friend_applications` 和 `notifications`。
 - **说说**：`/talks` 公开读取；APK 走 `/admin/talks` 发布，网站实时看到。
+- **友链存活**：每天检测一次友链首页，404/410/5xx/网络错误标记为失效，按小时重试，恢复后自动移回正常列表；`/friends?alive=0` 供网站「无法访问的网站」分组使用。
 - **朋友圈**：Cron 每分钟处理一个友链源，自动发现 RSS/Atom → D1 → `/feeds`。
 - **鉴权**：APK 用 GitHub Device Flow 拿 GitHub Token，再换 Worker 会话；会话只存哈希，有效期 90 天。
 - **限速**：图床上传的 4 秒间隔由 APK 处理；Worker 侧友链申请按 IP 每天 5 条。
@@ -62,8 +63,8 @@ Worker 的 `ADMIN_GITHUB_LOGIN` 为 `Bytelv`；只有这个 GitHub 账号能换�
 - 文章/页面/配置浏览与 Markdown 编辑，front-matter 属性编辑。
 - Stellar 标签插入面板、闭合校验、离线 HTML 预览（marked + DOMPurify）。
 - 图床 API 上传（HTTP Basic），支持 Markdown 或 `{% image %}` 插入。
-- 说说：NENO 风格卡片流（顶部输入卡片、卡片外时间、绿色标签）+ 极简编辑页、发布/编辑/删除、tgtalk JSON 导入（可选图片转存）。
-- 友链：待审核、通过/拒绝、编辑、抓取状态、通知角标。
+- 说说：NENO 风格卡片流（点击顶部输入卡片在当前页展开，随字数增高，超过阈值淡入全屏编辑器）、发布/编辑/删除、tgtalk JSON 导入（可选图片转存）。
+- 友链：待审核、通过/拒绝、编辑、抓取状态、存活状态（无法访问角标）、通知角标。
 - 更新检查：设置里手动检查，启动时静默检查（12 小时内只请求一次），有新版本弹窗直达 APK。
 - WorkManager 每 15 分钟轮询通知；打开 App 立即同步。
 
@@ -183,6 +184,7 @@ npx wrangler secret put IP_SALT
 - Cron 每分钟取一个 `next_fetch_at` 到期的友链源。
 - 先抓站点 HTML 发现 `<link rel="alternate" type="application/rss+xml">`，再试常见路径。
 - 支持 RSS 2.0 / Atom；失败会记录 `last_error` 并退避。
+- 朋友圈日期：优先读取 `article:published_time`、JSON-LD、`<time datetime>` 和页面可见日期；RSS 缺日期时回查文章页，仍无法确定则排在最后并显示「日期未知」，不再把抓取时间当成发布时间。
 - 某个站点一直失败时，在 APK 友链编辑里手动填 RSS 地址。
 - 免费 Worker 计划下这个频率足够 30~40 个友链，约半小时轮完一轮。
 - 2026-10-31 运行现状：34 个友链里 20 个自动发现 RSS，2 个通过 HTML 爬取补上（陈YF、安子璠），已抓 330+ 篇文章；其余 12 个站点返回 403/404/526 或是 JS 渲染，APK 会显示失败原因，可手动填订阅地址。

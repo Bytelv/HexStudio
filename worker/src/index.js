@@ -305,10 +305,14 @@ async function handleGithubLogin(request, env) {
 /* 公共接口                                                            */
 /* ------------------------------------------------------------------ */
 
-async function listFriends(env) {
+async function listFriends(request, env) {
+  const url = new URL(request.url);
+  const aliveParam = url.searchParams.get('alive');
+  const aliveFilter = aliveParam === '0' || aliveParam === '1' ? ` AND alive = ${Number(aliveParam)}` : '';
   const rows = await dbAll(
     env,
-    'SELECT title, url, avatar, description, keywords FROM friends WHERE visible = 1 ORDER BY sort ASC, id ASC'
+    `SELECT title, url, avatar, description, keywords, alive, health_checked_at, health_error
+       FROM friends WHERE visible = 1${aliveFilter} ORDER BY sort ASC, id ASC`
   );
   return {
     version: 'v2',
@@ -318,6 +322,9 @@ async function listFriends(env) {
       avatar: r.avatar || '',
       description: r.description || '',
       keywords: r.keywords || '',
+      alive: Number(r.alive) === 1,
+      health_checked_at: Number(r.health_checked_at || 0),
+      health_error: r.health_error || '',
     })),
   };
 }
@@ -441,7 +448,7 @@ async function listFeeds(request, env) {
        FROM feed_articles a
        JOIN friends f ON f.id = a.friend_id
       WHERE f.visible = 1
-      ORDER BY a.published_at DESC
+      ORDER BY a.published_at DESC, a.id DESC
       LIMIT ?`,
     limit
   );
@@ -463,8 +470,8 @@ async function listFeeds(request, env) {
         friend_url: r.friend_url,
         avatar: r.avatar || '',
         author: r.author || r.friend_title,
-        created: formatDateCN(r.published_at),
-        created_at: Number(r.published_at),
+        created: Number(r.published_at) > 0 ? formatDateCN(r.published_at) : '日期未知',
+        created_at: Number(r.published_at) || 0,
         link: r.link,
         title: r.title,
         summary: r.summary || '',
@@ -613,6 +620,10 @@ async function adminFriends(env) {
       ...r,
       feed_enabled: !!r.feed_enabled,
       visible: !!r.visible,
+      alive: !!r.alive,
+      health_checked_at: Number(r.health_checked_at || 0),
+      health_checked: r.health_checked_at ? formatDateCN(r.health_checked_at, true) : '',
+      health_error: r.health_error || '',
       last_fetched: r.last_fetched_at ? formatDateCN(r.last_fetched_at, true) : '',
     })),
   });
@@ -666,6 +677,11 @@ async function updateFriend(request, env, id) {
     const u = normalizeUrl(body.url);
     if (!u) throw new HttpError(400, '网址不合法');
     add('url', u);
+    if (u !== existing.url) {
+      add('alive', 1);
+      add('health_next_at', 0);
+      add('health_error', '');
+    }
   }
   if (body.avatar !== undefined) add('avatar', normalizeUrl(body.avatar));
   if (body.description !== undefined) add('description', clampStr(body.description, 300));
@@ -990,9 +1006,10 @@ function parseFeed(body, feedUrl, friend) {
     if (!link || seen.has(link)) continue;
     seen.add(link);
 
-    let published = Date.parse(rawDate);
-    if (!Number.isFinite(published)) published = t;
-    published = Math.min(published, t);
+    let published = parseDateValue(rawDate);
+    if (!Number.isFinite(published)) published = dateFromText(title);
+    if (!Number.isFinite(published)) published = dateFromUrl(link);
+    published = Number.isFinite(published) && published > 0 ? Math.min(published, t) : 0;
 
     const cleanSummary = stripHtml(summary).slice(0, 220);
     items.push({
@@ -1004,6 +1021,43 @@ function parseFeed(body, feedUrl, friend) {
       published_at: published,
     });
   }
+  return items;
+}
+
+async function enrichFeedDates(items, t) {
+  if (!items.length) return items;
+  for (const item of items) {
+    if (!item.published_at) {
+      const guessed = dateFromText(item.title);
+      if (Number.isFinite(guessed) && guessed > 0) item.published_at = Math.min(guessed, t);
+    }
+  }
+
+  const dates = items.map((item) => item.published_at).filter((value) => value > 0);
+  const missing = dates.length < items.length;
+  const collapsed = items.length >= 3 && dates.length === items.length &&
+    Math.max(...dates) - Math.min(...dates) < 5 * 60 * 1000;
+  if (!missing && !collapsed) return items;
+
+  // 订阅没有日期、或整份订阅共用同一个生成时间时，回查文章页的发布时间
+  const sample = items.slice(0, CRAWL_MAX_ITEMS);
+  const metas = await mapLimit(sample, 4, async (item) => {
+    try {
+      const page = await fetchText(item.link, {
+        userAgent: BROWSER_UA,
+        timeout: 6000,
+        headers: { Accept: 'text/html,application/xhtml+xml' },
+      });
+      if (!page.ok) return null;
+      return extractPageMeta(page.body, item.link, item.title);
+    } catch {
+      return null;
+    }
+  });
+  sample.forEach((item, index) => {
+    const meta = metas[index];
+    if (meta?.published_at > 0) item.published_at = Math.min(meta.published_at, t);
+  });
   return items;
 }
 
@@ -1115,7 +1169,6 @@ async function discoverFeed(siteUrl) {
 /* ------------------------------------------------------------------ */
 
 const CRAWL_MAX_ITEMS = 8;
-const CRAWL_FETCH_PAGES = 3;
 const CRAWL_ARTICLE_HINT = /\/(?:posts?|articles?|p|blog|notes?|essays?|tech|life)\/|(?:19|20)\d{2}[/-]\d{1,2}/i;
 const CRAWL_SKIP_PATH = /(^\/$|\/(?:about|about-me|friend|friends|link|links|tag|tags|category|categories|search|login|signin|signup|register|comment|comments|page|author|cdn-cgi|wp-admin|wp-login|feed|rss|sitemap|robots|privacy|terms|contact)(?:\/|$)|^\/archives?\/?$|\.(?:css|js|mjs|json|xml|txt|png|jpe?g|gif|webp|svg|ico|pdf|zip|rar|gz|mp4|mp3)$)/i;
 
@@ -1142,6 +1195,59 @@ function dateFromUrl(url) {
     if (match) return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
   } catch { /* ignore */ }
   return NaN;
+}
+
+const MONTH_INDEX = {
+  jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2,
+  apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6,
+  aug: 7, august: 7, sep: 8, september: 8, sept: 8,
+  oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11,
+};
+
+function validYmd(year, month, day) {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if (!(y >= 1970 && y <= 2200 && m >= 1 && m <= 12 && d >= 1 && d <= 31)) return NaN;
+  return Date.UTC(y, m - 1, d);
+}
+
+function parseDateValue(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return NaN;
+  if (/^\d{10,13}$/.test(raw)) {
+    const n = Number(raw);
+    return n < 1e12 ? n * 1000 : n;
+  }
+  return Date.parse(raw);
+}
+
+function dateFromText(value) {
+  const s = String(value || '').replace(/\s+/g, ' ').slice(0, 6000);
+  if (!s) return NaN;
+  let m = s.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  if (m) return validYmd(m[1], m[2], m[3]);
+  m = s.match(/(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) return validYmd(m[1], m[2], m[3]);
+  m = s.match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(20\d{2})\b/i);
+  if (m) {
+    const month = MONTH_INDEX[m[1].toLowerCase()];
+    if (month != null) return validYmd(m[3], month + 1, m[2]);
+  }
+  return NaN;
+}
+
+async function mapLimit(items, limit, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(Math.max(limit, 1), items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
 }
 
 function extractPageMeta(html, pageUrl, fallbackTitle = '') {
@@ -1183,10 +1289,16 @@ function extractPageMeta(html, pageUrl, fallbackTitle = '') {
       .find(Boolean);
     if (timeTag) rawDate = timeTag;
   }
-  let published = Date.parse(rawDate);
+  let published = parseDateValue(rawDate);
+  if (!Number.isFinite(published)) {
+    const hint = source.match(/<(?:span|div|p|time|li)[^>]*(?:class|id)="[^"]*(?:date|time|published|post-meta|post-info|meta)[^"]*"[^>]*>([\s\S]{0,160}?)<\/(?:span|div|p|time|li)>/i);
+    if (hint) published = dateFromText(stripHtml(hint[1]));
+  }
+  if (!Number.isFinite(published)) published = dateFromText(fallback + ' ' + pageTitle);
+  if (!Number.isFinite(published)) published = dateFromText(stripHtml(source));
   if (!Number.isFinite(published)) published = dateFromUrl(pageUrl);
-  if (!Number.isFinite(published)) published = now();
-  return { title, description, published_at: Math.min(published, now()) };
+  const known = Number.isFinite(published) && published > 0;
+  return { title, description, published_at: known ? Math.min(published, now()) : 0 };
 }
 
 function cleanLinkText(value) {
@@ -1349,36 +1461,35 @@ async function discoverSitemap(siteUrl) {
 
 async function crawlFromCandidates(candidates, friend) {
   const selected = candidates.slice(0, CRAWL_MAX_ITEMS);
-  const metaResults = await Promise.all(
-    selected.slice(0, CRAWL_FETCH_PAGES).map(async (candidate) => {
-      try {
-        const page = await fetchText(candidate.url, {
-          userAgent: BROWSER_UA,
-          timeout: 6000,
-          headers: { Accept: 'text/html,application/xhtml+xml' },
-        });
-        if (!page.ok) return null;
-        return extractPageMeta(page.body, candidate.url, candidate.title);
-      } catch {
-        return null;
-      }
-    })
-  );
+  const metaResults = await mapLimit(selected, 4, async (candidate) => {
+    try {
+      const page = await fetchText(candidate.url, {
+        userAgent: BROWSER_UA,
+        timeout: 6000,
+        headers: { Accept: 'text/html,application/xhtml+xml' },
+      });
+      if (!page.ok) return null;
+      return extractPageMeta(page.body, candidate.url, candidate.title);
+    } catch {
+      return null;
+    }
+  });
 
   const items = [];
   const seen = new Set();
   for (const [index, candidate] of selected.entries()) {
     let title = candidate.title || '';
     let summary = '';
-    let published = dateFromUrl(candidate.url);
-    if (!Number.isFinite(published) && candidate.lastmod) published = Date.parse(candidate.lastmod);
-    if (!Number.isFinite(published)) published = now();
+    let published = 0;
     const meta = metaResults[index];
     if (meta) {
       if (meta.title) title = meta.title;
       if (meta.description) summary = meta.description;
-      if (Number.isFinite(meta.published_at)) published = meta.published_at;
+      if (meta.published_at > 0) published = meta.published_at;
     }
+    if (!published) published = dateFromText(candidate.title);
+    if (!published && candidate.lastmod) published = parseDateValue(candidate.lastmod);
+    if (!published) published = dateFromUrl(candidate.url);
 
     if (!title) {
       try {
@@ -1400,7 +1511,7 @@ async function crawlFromCandidates(candidates, friend) {
       author: friend.title || '',
       avatar: friend.avatar || '',
       summary: summary.slice(0, 220),
-      published_at: Math.min(published, now()),
+      published_at: Number.isFinite(published) && published > 0 ? Math.min(published, now()) : 0,
     });
   }
   return items;
@@ -1454,9 +1565,19 @@ async function insertArticles(env, friend, items, t) {
   let inserted = 0;
   const stmts = items.map((item) =>
     env.DB.prepare(
-      `INSERT OR IGNORE INTO feed_articles
+      `INSERT INTO feed_articles
          (friend_id, title, link, author, avatar, summary, published_at, fetched_at)
-       VALUES (?,?,?,?,?,?,?,?)`
+       VALUES (?,?,?,?,?,?,?,?)
+       ON CONFLICT(link) DO UPDATE SET
+         title = CASE WHEN excluded.title <> '' THEN excluded.title ELSE feed_articles.title END,
+         author = CASE WHEN excluded.author <> '' THEN excluded.author ELSE feed_articles.author END,
+         avatar = CASE WHEN excluded.avatar <> '' THEN excluded.avatar ELSE feed_articles.avatar END,
+         summary = CASE WHEN excluded.summary <> '' THEN excluded.summary ELSE feed_articles.summary END,
+         fetched_at = excluded.fetched_at,
+         published_at = CASE
+           WHEN excluded.published_at > 0 THEN excluded.published_at
+           ELSE feed_articles.published_at
+         END`
     ).bind(
       friend.id, item.title, item.link, item.author, item.avatar, item.summary, item.published_at, t
     )
@@ -1529,6 +1650,7 @@ async function refreshFriend(env, friend) {
         feedError = '返回内容不是 RSS/Atom';
       } else {
         const items = parseFeed(feedResponse.body, feedUrl, friend);
+        await enrichFeedDates(items, t);
         const inserted = await insertArticles(env, friend, items, t);
         await dbRun(
           env,
@@ -1616,6 +1738,87 @@ async function processNextFeed(env) {
   return refreshFriend(env, friend);
 }
 
+const HEALTH_TIMEOUT_MS = 9000;
+const HEALTH_DAY_MS = 24 * 60 * 60 * 1000;
+
+function isAliveStatus(code) {
+  return code >= 200 && code < 500 && code !== 404 && code !== 410;
+}
+
+async function probeFriendSite(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        'User-Agent': BROWSER_UA,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
+    try { await response.body?.cancel(); } catch { /* ignore */ }
+    const code = response.status;
+    // 401/403/429 说明站点还在，只是拦截了机器人；404/410/5xx 视为失效
+    const alive = isAliveStatus(code);
+    return { alive, code, error: alive ? '' : `HTTP ${code}` };
+  } catch (e) {
+    return {
+      alive: false,
+      code: 0,
+      error: e?.name === 'AbortError' ? '连接超时' : (clampStr(String(e?.message || e), 120) || '无法连接'),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function checkFriendHealth(env, friend) {
+  const t = now();
+  const probe = await probeFriendSite(friend.url);
+  const failCount = probe.alive ? 0 : Math.min(Number(friend.health_fail_count || 0) + 1, 8);
+  const next = probe.alive
+    ? t + HEALTH_DAY_MS
+    : t + Math.min(failCount, 4) * 60 * 60 * 1000;
+  await dbRun(
+    env,
+    `UPDATE friends SET alive = ?, health_checked_at = ?, health_next_at = ?,
+       health_fail_count = ?, health_code = ?, health_error = ?, updated_at = ?
+     WHERE id = ?`,
+    probe.alive ? 1 : 0,
+    t,
+    next,
+    failCount,
+    probe.code || null,
+    probe.error,
+    t,
+    friend.id
+  );
+  return {
+    ok: true,
+    friend_id: friend.id,
+    alive: probe.alive,
+    status: probe.code,
+    error: probe.error,
+  };
+}
+
+async function processNextHealth(env) {
+  const t = now();
+  const friend = await dbFirst(
+    env,
+    `SELECT * FROM friends
+      WHERE visible = 1 AND (health_next_at IS NULL OR health_next_at <= ?)
+      ORDER BY COALESCE(health_next_at, 0) ASC, id ASC
+      LIMIT 1`,
+    t
+  );
+  if (!friend) return { ok: true, idle: true };
+  await dbRun(env, 'UPDATE friends SET health_next_at = ? WHERE id = ?', t + 10 * 60 * 1000, friend.id);
+  return checkFriendHealth(env, friend);
+}
+
 async function manualFeedRefresh(request, env) {
   const body = await readJson(request);
   const friendId = toInt(body.friend_id, 0);
@@ -1700,7 +1903,7 @@ async function route(request, env) {
   }
 
   if (path === '/friends' && method === 'GET') {
-    return json(await listFriends(env), 200, { 'Cache-Control': 'public, max-age=60' });
+    return json(await listFriends(request, env), 200, { 'Cache-Control': 'public, max-age=60' });
   }
   if (path === '/friends/apply' && method === 'POST') return applyFriend(request, env);
   if (path === '/talks' && method === 'GET') return listTalks(request, env);
@@ -1743,6 +1946,16 @@ export default {
         } catch (e) {
           console.error('feed tick failed', e);
         }
+        for (let i = 0; i < 2; i++) {
+          try {
+            const result = await processNextHealth(env);
+            console.log('health tick', JSON.stringify(result));
+            if (result.idle) break;
+          } catch (e) {
+            console.error('health tick failed', e);
+            break;
+          }
+        }
       })()
     );
   },
@@ -1760,6 +1973,9 @@ export const __test = {
   extractPageMeta,
   parseSitemapUrls,
   dateFromUrl,
+  dateFromText,
+  parseDateValue,
+  isAliveStatus,
   linkScore,
   shouldSkipCrawlLink,
 };

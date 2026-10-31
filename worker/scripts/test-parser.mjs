@@ -53,6 +53,31 @@ assert.equal(atomItems.length, 1);
 assert.equal(atomItems[0].link, 'https://example.com/atom/post-1');
 assert.equal(atomItems[0].author, 'Bob');
 
+const undated = `<rss version="2.0"><channel><item>
+<title>No date here</title><link>https://example.com/posts/undated</link>
+<description>Still a valid item</description>
+</item></channel></rss>`;
+const undatedItems = __test.parseFeed(undated, 'https://example.com/feed.xml', friend);
+assert.equal(undatedItems.length, 1);
+assert.equal(undatedItems[0].published_at, 0, 'missing feed date must not become crawl time');
+
+assert.equal(
+  new Date(__test.dateFromText('发布于 2022年12月04日')).toISOString().slice(0, 10),
+  '2022-12-04'
+);
+assert.equal(
+  new Date(__test.dateFromText('SpeedUp! June 7, 2022')).toISOString().slice(0, 10),
+  '2022-06-07'
+);
+assert.equal(__test.parseDateValue('1609459200000'), 1609459200000);
+
+for (const code of [200, 301, 401, 403, 429, 499]) {
+  assert.equal(__test.isAliveStatus(code), true, `HTTP ${code} should count as reachable`);
+}
+for (const code of [0, 404, 410, 500, 502, 526, 530]) {
+  assert.equal(__test.isAliveStatus(code), false, `HTTP ${code} should count as unreachable`);
+}
+
 assert.equal(__test.looksLikeFeed(rss), true);
 assert.equal(__test.looksLikeFeed(atom), true);
 assert.equal(__test.looksLikeFeed('<html>nope</html>'), false);
@@ -92,6 +117,32 @@ const meta = __test.extractPageMeta(sampleHtml, 'https://example.com/posts/hello
 assert.equal(meta.title, 'Crawled Post');
 assert.equal(meta.description, 'A crawled summary');
 assert.ok(meta.published_at > 0);
+
+const visibleDateHtml = `<html><head><title>Old Post</title></head><body>
+<div class="post-meta">2022年12月04日</div><article><p>正文</p></article>
+</body></html>`;
+const visibleMeta = __test.extractPageMeta(
+  visibleDateHtml,
+  'https://nur512.cn/index.php/archives/179/'
+);
+assert.equal(
+  new Date(visibleMeta.published_at).toISOString().slice(0, 10),
+  '2022-12-04',
+  'visible Chinese date should be parsed'
+);
+
+const numericTimeHtml = `<html><head><title>Numeric time</title></head><body>
+<time datetime="1609459200000"></time></body></html>`;
+const numericMeta = __test.extractPageMeta(numericTimeHtml, 'https://www.anzifan.com/post/demo');
+assert.equal(
+  new Date(numericMeta.published_at).toISOString().slice(0, 10),
+  '2021-01-01',
+  'numeric time datetime should be parsed'
+);
+
+const undatedHtml = `<html><head><title>Undated page</title></head><body><p>no date</p></body></html>`;
+const undatedMeta = __test.extractPageMeta(undatedHtml, 'https://example.com/archives/1');
+assert.equal(undatedMeta.published_at, 0, 'unknown page date must stay unknown');
 
 const sitemap = `<?xml version="1.0"?><urlset><url><loc>https://example.com/posts/a</loc><lastmod>2026-10-29</lastmod></url><url><loc>https://example.com/about</loc></url></urlset>`;
 const sitemapUrls = __test.parseSitemapUrls(sitemap, 'https://example.com/');

@@ -16,6 +16,12 @@ CREATE TABLE IF NOT EXISTS friends (
   fail_count INTEGER NOT NULL DEFAULT 0,
   last_fetched_at INTEGER,
   last_error TEXT,
+  alive INTEGER NOT NULL DEFAULT 1,
+  health_checked_at INTEGER,
+  health_next_at INTEGER,
+  health_fail_count INTEGER NOT NULL DEFAULT 0,
+  health_code INTEGER,
+  health_error TEXT NOT NULL DEFAULT '',
   etag TEXT,
   last_modified TEXT,
   next_fetch_at INTEGER,
@@ -25,6 +31,7 @@ CREATE TABLE IF NOT EXISTS friends (
 
 CREATE INDEX IF NOT EXISTS idx_friends_visible ON friends (visible, sort, id);
 CREATE INDEX IF NOT EXISTS idx_friends_feed ON friends (feed_enabled, next_fetch_at);
+CREATE INDEX IF NOT EXISTS idx_friends_health ON friends (visible, health_next_at);
 
 CREATE TABLE IF NOT EXISTS friend_applications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
