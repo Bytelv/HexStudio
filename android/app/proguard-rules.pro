@@ -6,3 +6,6 @@
 -keep,includedescriptorclasses class top.lvbyte.hexstudio.**$$serializer { *; }
 -keepclassmembers class top.lvbyte.hexstudio.** { *** Companion; }
 -keepclasseswithmembers class top.lvbyte.hexstudio.** { kotlinx.serialization.KSerializer serializer(...); }
+
+# security-crypto / Tink 的编译期注解，运行时不需要
+-dontwarn com.google.errorprone.annotations.**

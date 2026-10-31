@@ -2,6 +2,14 @@ package top.lvbyte.hexstudio.ui.screens.content
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -111,7 +119,7 @@ fun ContentScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = vm::load) {
+                    IconButton(onClick = { vm.load(force = true) }) {
                         Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
                     }
                 }
@@ -138,7 +146,7 @@ fun ContentScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 14.dp)
+                .padding(horizontal = 16.dp)
         ) {
             OutlinedTextField(
                 value = state.query,
@@ -162,14 +170,16 @@ fun ContentScreen(
             if (state.loading && state.items.isEmpty()) {
                 AppLoading("读取仓库文件树…")
             } else if (!state.error.isNullOrBlank() && state.items.isEmpty()) {
-                ErrorCard(state.error ?: "", onRetry = vm::load)
+                ErrorCard(state.error ?: "", onRetry = { vm.load(force = true) })
             } else {
                 val query = state.query.trim()
-                val filtered = state.items.filter { item ->
-                    (state.filter == null || item.kind == state.filter) &&
-                        (query.isBlank() ||
-                            item.name.contains(query, ignoreCase = true) ||
-                            item.path.contains(query, ignoreCase = true))
+                val filtered = remember(state.items, state.filter, query) {
+                    state.items.filter { item ->
+                        (state.filter == null || item.kind == state.filter) &&
+                            (query.isBlank() ||
+                                item.name.contains(query, ignoreCase = true) ||
+                                item.path.contains(query, ignoreCase = true))
+                    }
                 }
                 if (filtered.isEmpty()) {
                     EmptyState(
@@ -178,17 +188,17 @@ fun ContentScreen(
                         description = "可以调整搜索条件，或点右下角新建文章。"
                     )
                 } else {
-                    val groups = filtered.groupBy { it.kind }
+                    val groups = remember(filtered) { filtered.groupBy { it.kind } }
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(0.dp)
                     ) {
                         ContentKind.entries.forEach { kind ->
                             val list = groups[kind] ?: return@forEach
                             item(key = "header-${kind.name}") {
                                 Text(
                                     "${kind.label} · ${list.size}",
-                                    modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+                                    modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -312,17 +322,17 @@ fun ContentScreen(
 
 @Composable
 private fun ContentRow(item: ContentItem, onClick: () -> Unit) {
-    Surface(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surface
+            .clickable(onClick = onClick)
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             val icon = when (item.kind) {
                 ContentKind.POST -> Icons.AutoMirrored.Outlined.Article
@@ -330,7 +340,15 @@ private fun ContentRow(item: ContentItem, onClick: () -> Unit) {
                 ContentKind.CONFIG -> Icons.Outlined.Settings
                 ContentKind.DRAFT -> Icons.Outlined.StickyNote2
             }
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.09f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp))
+            }
             Column(Modifier.weight(1f)) {
                 Text(
                     item.name,
@@ -350,5 +368,6 @@ private fun ContentRow(item: ContentItem, onClick: () -> Unit) {
             }
             StatusPill(item.kind.label)
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }

@@ -36,6 +36,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             container.secure.clearAll()
             container.settings.clearAccount()
+            container.repoCache.clearAll()
             _gate.value = Gate.NeedLogin
         }
     }

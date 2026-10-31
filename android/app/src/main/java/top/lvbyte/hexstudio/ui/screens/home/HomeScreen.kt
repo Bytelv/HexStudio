@@ -1,6 +1,7 @@
 package top.lvbyte.hexstudio.ui.screens.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,7 +13,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AddCircleOutline
@@ -37,10 +40,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -68,15 +72,26 @@ fun HomeScreen(
     val state by vm.state.collectAsStateWithLifecycle()
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        if (!state.loading) vm.load()
+        vm.load()
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("首页") },
+                title = {
+                    Column {
+                        Text("HexStudio", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            state.repoFullName.ifBlank { "博客工作台" },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                },
                 actions = {
-                    IconButton(onClick = vm::load, enabled = !state.loading) {
+                    IconButton(onClick = { vm.load(force = true) }, enabled = !state.loading) {
                         if (state.loading) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         } else {
@@ -95,8 +110,8 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item { Spacer(Modifier.height(2.dp)) }
             item {
@@ -110,52 +125,24 @@ fun HomeScreen(
                 )
             }
             if (!state.error.isNullOrBlank()) {
-                item { ErrorCard(state.error ?: "", onRetry = vm::load) }
+                item { ErrorCard(state.error ?: "", onRetry = { vm.load(force = true) }) }
             }
             if (!state.serviceError.isNullOrBlank()) {
-                item { ErrorCard(state.serviceError ?: "", onRetry = vm::load) }
+                item { ErrorCard(state.serviceError ?: "", onRetry = { vm.load(force = true) }) }
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatCard(
-                        modifier = Modifier.weight(1f),
-                        label = "文章",
-                        value = state.postCount.toString(),
-                        icon = Icons.Outlined.Article,
-                        onClick = { onOpenContent(false) }
-                    )
-                    StatCard(
-                        modifier = Modifier.weight(1f),
-                        label = "页面",
-                        value = state.pageCount.toString(),
-                        icon = Icons.Outlined.Description,
-                        onClick = { onOpenContent(false) }
-                    )
-                }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatCard(
-                        modifier = Modifier.weight(1f),
-                        label = "待审核友链",
-                        value = (state.stats?.pendingApplications ?: 0).toString(),
-                        icon = Icons.Outlined.Link,
-                        accent = MaterialTheme.colorScheme.tertiary,
-                        onClick = onOpenFriends
-                    )
-                    StatCard(
-                        modifier = Modifier.weight(1f),
-                        label = "未读通知",
-                        value = (state.stats?.unreadNotifications ?: 0).toString(),
-                        icon = Icons.Outlined.NotificationsNone,
-                        accent = MaterialTheme.colorScheme.secondary,
-                        onClick = onOpenFriends
-                    )
-                }
+                OverviewStrip(
+                    posts = state.postCount,
+                    pages = state.pageCount,
+                    pending = state.stats?.pendingApplications ?: 0,
+                    unread = state.stats?.unreadNotifications ?: 0,
+                    onOpenContent = { onOpenContent(false) },
+                    onOpenFriends = onOpenFriends
+                )
             }
             item {
                 SectionCard(title = "快捷操作") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         QuickAction(
                             modifier = Modifier.weight(1f),
                             icon = Icons.Outlined.AddCircleOutline,
@@ -189,7 +176,7 @@ fun HomeScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         MiniStat(Modifier.weight(1f), "友链", stats.friends.toString())
                         MiniStat(Modifier.weight(1f), "说说", stats.talks.toString())
-                        MiniStat(Modifier.weight(1f), "朋友圈文章", stats.articles.toString())
+                        MiniStat(Modifier.weight(1f), "朋友圈", stats.articles.toString())
                         MiniStat(
                             Modifier.weight(1f),
                             "抓取异常",
@@ -202,14 +189,14 @@ fun HomeScreen(
             item {
                 SectionCard(title = "发布链路") {
                     Text(
-                        "文章保存后直接提交到 GitHub，Cloudflare Pages 会自动构建并上线；说说和友链走 Cloudflare Worker + D1，无需等待构建。",
+                        "文章保存后提交到 GitHub，Cloudflare Pages 自动构建；说说和友链走 Worker + D1，即时生效。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         StatusPill("GitHub")
-                        StatusPill("Cloudflare Pages", MaterialTheme.colorScheme.secondary)
+                        StatusPill("Pages", MaterialTheme.colorScheme.secondary)
                         StatusPill("Worker + D1", MaterialTheme.colorScheme.tertiary)
                     }
                 }
@@ -228,83 +215,161 @@ private fun HeroCard(
     branch: String,
     onSwitchRepo: () -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(22.dp),
-        color = Color.Transparent
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.primary)
+            .padding(18.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.secondary
-                        )
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .border(2.dp, Color.White.copy(alpha = 0.55f), CircleShape)
+                        .padding(2.dp)
+                ) {
+                    Avatar(url = avatarUrl, name = login.ifBlank { "L" }, size = 44)
+                }
+                Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                    Text(
+                        "$greeting，${login.ifBlank { "站长" }}",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium
                     )
-                )
-                .padding(18.dp)
-        ) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(url = avatarUrl, name = login.ifBlank { "L" }, size = 46)
-                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
-                        Text(
-                            "$greeting，${login.ifBlank { "站长" }}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            if (repo.isBlank()) "还没有选择仓库" else repo,
-                            color = Color.White.copy(alpha = 0.86f),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Icon(
-                        Icons.Outlined.SwapHoriz,
-                        contentDescription = "切换仓库",
-                        tint = Color.White.copy(alpha = 0.9f),
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clickable(onClick = onSwitchRepo)
+                    Text(
+                        if (repo.isBlank()) "还没有选择仓库" else repo,
+                        color = Color.White.copy(alpha = 0.82f),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    "分支 $branch · 在手机上继续折腾博客",
-                    color = Color.White.copy(alpha = 0.86f),
-                    style = MaterialTheme.typography.labelMedium
-                )
+                Surface(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable(onClick = onSwitchRepo),
+                    color = Color.White.copy(alpha = 0.16f),
+                    shape = RoundedCornerShape(999.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Outlined.SwapHoriz,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("切换", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "分支 $branch",
+                color = Color.White.copy(alpha = 0.78f),
+                style = MaterialTheme.typography.labelSmall
+            )
         }
     }
 }
 
 @Composable
-private fun StatCard(
-    modifier: Modifier = Modifier,
-    label: String,
-    value: String,
-    icon: ImageVector,
-    accent: Color = MaterialTheme.colorScheme.primary,
-    onClick: () -> Unit
+private fun OverviewStrip(
+    posts: Int,
+    pages: Int,
+    pending: Int,
+    unread: Int,
+    onOpenContent: () -> Unit,
+    onOpenFriends: () -> Unit
 ) {
     Surface(
-        modifier = modifier.clickable(onClick = onClick),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant,
+                MaterialTheme.shapes.large
+            ),
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface
     ) {
-        Column(Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.padding(horizontal = 4.dp))
-                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = accent)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OverviewItem(
+                modifier = Modifier.weight(1f),
+                label = "文章",
+                value = posts.toString(),
+                onClick = onOpenContent
+            )
+            OverviewDivider()
+            OverviewItem(
+                modifier = Modifier.weight(1f),
+                label = "页面",
+                value = pages.toString(),
+                onClick = onOpenContent
+            )
+            OverviewDivider()
+            OverviewItem(
+                modifier = Modifier.weight(1f),
+                label = "待审",
+                value = pending.toString(),
+                accent = if (pending > 0) MaterialTheme.colorScheme.tertiary else null,
+                onClick = onOpenFriends
+            )
+            OverviewDivider()
+            OverviewItem(
+                modifier = Modifier.weight(1f),
+                label = "未读",
+                value = unread.toString(),
+                accent = if (unread > 0) MaterialTheme.colorScheme.secondary else null,
+                onClick = onOpenFriends
+            )
         }
     }
+}
+
+@Composable
+private fun OverviewItem(
+    modifier: Modifier = Modifier,
+    label: String,
+    value: String,
+    accent: Color? = null,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            value,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = accent ?: MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun OverviewDivider() {
+    Box(
+        Modifier
+            .width(1.dp)
+            .height(28.dp)
+            .background(MaterialTheme.colorScheme.outlineVariant)
+    )
 }
 
 @Composable
@@ -314,19 +379,23 @@ private fun QuickAction(
     label: String,
     onClick: () -> Unit
 ) {
-    Surface(
-        modifier = modifier.clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    Column(
+        modifier = modifier
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column(
-            modifier = Modifier.padding(vertical = 12.dp, horizontal = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f), CircleShape),
+            contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(5.dp))
-            Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
         }
+        Spacer(Modifier.height(6.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
     }
 }
 

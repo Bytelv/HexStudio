@@ -1,6 +1,7 @@
 package top.lvbyte.hexstudio.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,7 +34,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.AsyncImage
 
 @Composable
 fun AppLoading(text: String = "加载中…", modifier: Modifier = Modifier) {
@@ -130,7 +131,11 @@ fun SectionCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     Surface(
-        modifier = modifier,
+        modifier = modifier.border(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant,
+            MaterialTheme.shapes.large
+        ),
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
@@ -157,37 +162,21 @@ fun Avatar(url: String?, name: String, size: Int = 40) {
             .background(MaterialTheme.colorScheme.primaryContainer),
         contentAlignment = Alignment.Center
     ) {
-        if (url.isNullOrBlank()) {
-            Text(
-                fallback,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.bodyMedium
-            )
-        } else {
-            SubcomposeAsyncImage(
+        // 底层始终绘制首字母；AsyncImage 加载成功后覆盖它。
+        // 列表里不要用 SubcomposeAsyncImage：每个头像都会开 subcomposition，
+        // 友链多的时候会明显掉帧。
+        Text(
+            fallback,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        if (!url.isNullOrBlank()) {
+            AsyncImage(
                 model = url,
                 contentDescription = name,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-                loading = {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            fallback,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
-                },
-                error = {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            fallback,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
-                }
+                modifier = Modifier.fillMaxSize()
             )
         }
     }

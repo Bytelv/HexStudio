@@ -1,6 +1,8 @@
 package top.lvbyte.hexstudio.ui.screens.friends
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -153,7 +155,7 @@ fun FriendsScreen(container: AppContainer) {
             }
             if (state.unread > 0) {
                 Surface(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.13f)
                 ) {
@@ -305,7 +307,15 @@ private fun ApplicationsTab(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         items(applications, key = { it.id }) { application ->
-            Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
+            Surface(
+                modifier = Modifier.border(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant,
+                    MaterialTheme.shapes.large
+                ),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surface
+            ) {
                 Column(Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Avatar(application.avatar, application.name, 42)
@@ -375,19 +385,17 @@ private fun FriendsTab(friends: List<Friend>, onEdit: (Friend) -> Unit) {
     }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         items(friends, key = { it.id }) { friend ->
-            Surface(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onEdit(friend) },
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.surface
+                    .clickable { onEdit(friend) }
             ) {
                 Row(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.padding(vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Avatar(friend.avatar, friend.title, 42)
@@ -421,6 +429,7 @@ private fun FriendsTab(friends: List<Friend>, onEdit: (Friend) -> Unit) {
                         }
                     }
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
     }
@@ -435,15 +444,23 @@ private fun FeedTab(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         item {
-            Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)) {
+            Surface(
+                modifier = Modifier.border(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant,
+                    MaterialTheme.shapes.large
+                ),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surface
+            ) {
                 Column(Modifier.padding(12.dp)) {
                     Text("朋友圈抓取", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "Cloudflare Cron 每分钟抓取一个友链源，输出给 /friend/rss/。失败会自动退避，可在这里手动触发。",
+                        "RSS/Atom 优先；没有订阅时自动尝试 sitemap 和首页 HTML 爬取。403/526 或纯 JS 站点仍可能失败，可手动填订阅地址。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -456,10 +473,17 @@ private fun FeedTab(
             }
         }
         items(feeds, key = { it.id }) { feed ->
-            Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
-                Column(Modifier.padding(12.dp)) {
+            Column(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(vertical = 11.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(feed.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        val modeLabel = when (feed.feedKind) {
+                            "feed" -> "RSS"
+                            "sitemap" -> "Sitemap"
+                            "html" -> "HTML"
+                            else -> feed.feedKind
+                        }
+                        StatusPill(modeLabel)
                         if (!feed.lastError.isNullOrBlank()) {
                             StatusPill("异常", MaterialTheme.colorScheme.error)
                         } else if (feed.lastFetched != null) {
@@ -490,6 +514,7 @@ private fun FeedTab(
                         )
                     }
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
         }
     }
@@ -543,7 +568,7 @@ private fun FriendEditDialog(
                 )
                 OutlinedTextField(
                     value = feedUrl, onValueChange = { feedUrl = it },
-                    label = { Text("RSS/Atom 地址（留空自动发现）") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+                    label = { Text("订阅/抓取地址（留空自动发现）") }, singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checked = feedEnabled, onCheckedChange = { feedEnabled = it })

@@ -117,7 +117,16 @@ fun TalksScreen(container: AppContainer) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("说说") },
+                title = {
+                    Column {
+                        Text("说说", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            "即时记录",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 actions = {
                     IconButton(onClick = { showImport = true }) {
                         Icon(Icons.Outlined.CloudDownload, contentDescription = "导入 tgtalk")
@@ -129,10 +138,14 @@ fun TalksScreen(container: AppContainer) {
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = {
-                editing = null
-                showCompose = true
-            }) {
+            FloatingActionButton(
+                onClick = {
+                    editing = null
+                    showCompose = true
+                },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
                 Icon(Icons.Outlined.Edit, contentDescription = "写说说")
             }
         },
@@ -163,12 +176,14 @@ fun TalksScreen(container: AppContainer) {
                             }
                         )
                     } else {
-                        val groups = state.talks.groupBy { TimeUtils.dayKey(it.createdAt) }
+                        val groups = remember(state.talks) {
+                            state.talks.groupBy { TimeUtils.dayKey(it.createdAt) }
+                        }
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                                start = 14.dp, end = 14.dp, top = 8.dp, bottom = 88.dp
+                                start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp
                             )
                         ) {
                             groups.forEach { (_, talks) ->
@@ -297,6 +312,13 @@ private fun TalkCard(
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant,
+                RoundedCornerShape(16.dp)
+            ),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface
     ) {
@@ -458,7 +480,8 @@ private fun TalkComposeDialog(
     }
 
     LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+        kotlinx.coroutines.delay(200)
+        runCatching { focusRequester.requestFocus() }
     }
 
     Dialog(

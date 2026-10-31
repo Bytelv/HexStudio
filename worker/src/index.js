@@ -670,7 +670,11 @@ async function updateFriend(request, env, id) {
   if (body.avatar !== undefined) add('avatar', normalizeUrl(body.avatar));
   if (body.description !== undefined) add('description', clampStr(body.description, 300));
   if (body.keywords !== undefined) add('keywords', clampStr(body.keywords, 200));
-  if (body.feed_url !== undefined) add('feed_url', normalizeUrl(body.feed_url) || null);
+  if (body.feed_url !== undefined) {
+    const nextFeedUrl = normalizeUrl(body.feed_url) || null;
+    add('feed_url', nextFeedUrl);
+    if (nextFeedUrl !== (existing.feed_url || null)) add('feed_kind', 'feed');
+  }
   if (body.feed_enabled !== undefined) add('feed_enabled', toBool(body.feed_enabled, true) ? 1 : 0);
   if (body.visible !== undefined) add('visible', toBool(body.visible, true) ? 1 : 0);
   if (body.sort !== undefined) add('sort', toInt(body.sort, existing.sort));
@@ -874,7 +878,7 @@ async function markNotifications(request, env) {
 async function adminFeedStatus(env) {
   const rows = await dbAll(
     env,
-    `SELECT id, title, url, feed_url, feed_enabled, last_error, fail_count,
+    `SELECT id, title, url, feed_url, feed_kind, feed_enabled, last_error, fail_count,
             last_fetched_at, next_fetch_at
        FROM friends ORDER BY sort ASC, id ASC`
   );
@@ -1106,81 +1110,481 @@ async function discoverFeed(siteUrl) {
   throw new Error(lastError);
 }
 
-async function refreshFriend(env, friend) {
-  const t = now();
-  const next = t + 45 * 60 * 1000;
-  let feedUrl = friend.feed_url || '';
-  let feedResponse = null;
-  let discovered = null;
+/* ------------------------------------------------------------------ */
+/* 朋友圈 HTML / Sitemap 爬虫回退                                       */
+/* ------------------------------------------------------------------ */
+
+const CRAWL_MAX_ITEMS = 8;
+const CRAWL_FETCH_PAGES = 3;
+const CRAWL_ARTICLE_HINT = /\/(?:posts?|articles?|p|blog|notes?|essays?|tech|life)\/|(?:19|20)\d{2}[/-]\d{1,2}/i;
+const CRAWL_SKIP_PATH = /(^\/$|\/(?:about|about-me|friend|friends|link|links|tag|tags|category|categories|search|login|signin|signup|register|comment|comments|page|author|cdn-cgi|wp-admin|wp-login|feed|rss|sitemap|robots|privacy|terms|contact)(?:\/|$)|^\/archives?\/?$|\.(?:css|js|mjs|json|xml|txt|png|jpe?g|gif|webp|svg|ico|pdf|zip|rar|gz|mp4|mp3)$)/i;
+
+function metaContent(html, key) {
+  const wanted = String(key || '').toLowerCase();
+  for (const tag of String(html || '').match(/<meta\b[^>]*>/gi) || []) {
+    const prop = (getAttr(tag, 'property') || getAttr(tag, 'name') || '').toLowerCase();
+    if (prop === wanted) {
+      const content = getAttr(tag, 'content');
+      if (content) return content;
+    }
+  }
+  return '';
+}
+
+function dateFromUrl(url) {
+  try {
+    const path = new URL(url).pathname;
+    let match = path.match(/\/(20\d{2})[/-](\d{1,2})(?:[/-](\d{1,2}))?(?:[/-]|$)/);
+    if (match) {
+      return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3] || 1));
+    }
+    match = path.match(/\/(20\d{2})(\d{2})(\d{2})(?:[/-]|$)/);
+    if (match) return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  } catch { /* ignore */ }
+  return NaN;
+}
+
+function extractPageMeta(html, pageUrl, fallbackTitle = '') {
+  const source = String(html || '').slice(0, 120_000);
+  const pageTitle = stripHtml(
+    metaContent(source, 'og:title') ||
+    metaContent(source, 'twitter:title') ||
+    getTag(source, 'title') ||
+    ''
+  );
+  const fallback = stripHtml(fallbackTitle);
+  const genericFallback = /^(阅读全文|阅读更多|继续阅读|详情|查看更多|read more|more)$/i.test(fallback);
+  let title = pageTitle || fallback;
+  // 有些主题的 <title> 会拼上站点名/摘要/日期；首页链接文字通常更干净
+  if (fallback && !genericFallback && fallback.length >= 6 && title.length > fallback.length + 12) {
+    title = fallback;
+  }
+  title = title.slice(0, 160);
+  const description = stripHtml(
+    metaContent(source, 'og:description') ||
+    metaContent(source, 'twitter:description') ||
+    metaContent(source, 'description') ||
+    ''
+  ).slice(0, 220);
+  let rawDate = metaContent(source, 'article:published_time') ||
+    metaContent(source, 'og:article:published_time') ||
+    metaContent(source, 'og:published_time') ||
+    metaContent(source, 'datePublished') ||
+    metaContent(source, 'date') ||
+    metaContent(source, 'pubdate') ||
+    '';
+  if (!rawDate) {
+    const jsonLd = source.match(/"datePublished"\s*:\s*"([^"]+)"/i);
+    if (jsonLd) rawDate = jsonLd[1];
+  }
+  if (!rawDate) {
+    const timeTag = (source.match(/<time\b[^>]*>/gi) || [])
+      .map((tag) => getAttr(tag, 'datetime'))
+      .find(Boolean);
+    if (timeTag) rawDate = timeTag;
+  }
+  let published = Date.parse(rawDate);
+  if (!Number.isFinite(published)) published = dateFromUrl(pageUrl);
+  if (!Number.isFinite(published)) published = now();
+  return { title, description, published_at: Math.min(published, now()) };
+}
+
+function cleanLinkText(value) {
+  return stripHtml(value).replace(/\s+/g, ' ').trim();
+}
+
+function shouldSkipCrawlLink(url, siteUrl) {
+  try {
+    const u = new URL(url);
+    const site = new URL(siteUrl);
+    if (u.origin !== site.origin) return true;
+    if (!/^https?:$/.test(u.protocol)) return true;
+    const isQueryPost = /(?:^|[?&])p=\d+(?:&|$)/.test(u.search);
+    if (u.pathname === '/' && isQueryPost) return false;
+    if (CRAWL_SKIP_PATH.test(u.pathname)) return true;
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function linkScore(url, text, siteUrl, lastmod = '') {
+  let score = 0;
+  try {
+    const u = new URL(url);
+    const path = u.pathname;
+    if (CRAWL_ARTICLE_HINT.test(path)) score += 5;
+    if (/(?:^|[?&])p=\d+(?:&|$)/.test(u.search)) score += 5;
+    if (path.split('/').filter(Boolean).length >= 2) score += 1;
+    if (/(?:19|20)\d{2}[/-]\d{1,2}/.test(path)) score += 2;
+    const textLength = cleanLinkText(text).length;
+    if (textLength >= 6) score += 2;
+    if (textLength >= 12) score += 2;
+    if (textLength >= 20) score += 1;
+    if (lastmod) score += 2;
+    if (shouldSkipCrawlLink(url, siteUrl)) score -= 100;
+  } catch {
+    score = -100;
+  }
+  return score;
+}
+
+function extractArticleLinks(html, siteUrl, limit = 12) {
+  const source = String(html || '').slice(0, 800_000);
+  const raw = [];
+  const seen = new Set();
+  const add = (href, text, lastmod = '') => {
+    if (!href) return;
+    let url;
+    try {
+      url = new URL(href, siteUrl).href.split('#')[0];
+    } catch {
+      return;
+    }
+    if (!url || seen.has(url) || url === siteUrl) return;
+    if (shouldSkipCrawlLink(url, siteUrl)) return;
+    const title = cleanLinkText(text);
+    if (title.length < 3) return;
+    seen.add(url);
+    raw.push({ url, title, lastmod });
+  };
+
+  for (const block of source.match(/<article\b[\s\S]*?<\/article>/gi) || []) {
+    const match = block.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
+    if (!match) continue;
+    const heading = block.match(/<h[1-4]\b[^>]*>([\s\S]*?)<\/h[1-4]>/i);
+    add(match[1], heading ? stripHtml(heading[1]) : match[2]);
+  }
+
+  for (const match of source.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    add(match[1], match[2]);
+  }
+
+  return raw
+    .map((item) => ({ ...item, score: linkScore(item.url, item.title, siteUrl, item.lastmod) }))
+    .filter((item) => item.score > 3)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+function parseSitemapUrls(xml, baseUrl) {
+  const source = String(xml || '').slice(0, 1_000_000);
+  const out = [];
+  const seen = new Set();
+  for (const block of source.match(/<url\b[\s\S]*?<\/url>/gi) || []) {
+    const loc = stripHtml(getTag(block, 'loc'));
+    if (!loc) continue;
+    let url;
+    try {
+      url = new URL(loc, baseUrl).href.split('#')[0];
+    } catch {
+      continue;
+    }
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push({ url, lastmod: stripHtml(getTag(block, 'lastmod')) });
+  }
+  return out;
+}
+
+function sitemapChildren(xml, baseUrl) {
+  const source = String(xml || '').slice(0, 500_000);
+  const out = [];
+  for (const block of source.match(/<sitemap\b[\s\S]*?<\/sitemap>/gi) || []) {
+    const loc = stripHtml(getTag(block, 'loc'));
+    if (!loc) continue;
+    try {
+      out.push(new URL(loc, baseUrl).href);
+    } catch { /* ignore */ }
+  }
+  return out.slice(0, 3);
+}
+
+async function discoverSitemap(siteUrl) {
+  const candidates = [];
+  const seen = new Set();
+  const add = (value) => {
+    if (!value) return;
+    try {
+      const url = new URL(value, siteUrl).href;
+      if (!seen.has(url)) {
+        seen.add(url);
+        candidates.push(url);
+      }
+    } catch { /* ignore */ }
+  };
 
   try {
-    if (!feedUrl) {
-      discovered = await discoverFeed(friend.url);
-      feedUrl = discovered.feedUrl;
-      feedResponse = discovered;
-    } else {
-      const headers = {};
-      if (friend.etag) headers['If-None-Match'] = friend.etag;
-      if (friend.last_modified) headers['If-Modified-Since'] = friend.last_modified;
+    const robots = await fetchText(new URL('/robots.txt', siteUrl).href, {
+      userAgent: BROWSER_UA,
+      timeout: 8000,
+    });
+    if (robots.ok) {
+      for (const match of robots.body.matchAll(/^\s*Sitemap:\s*(\S+)\s*$/gim)) add(match[1]);
+    }
+  } catch { /* ignore */ }
+
+  for (const path of ['/sitemap.xml', '/sitemap_index.xml', '/sitemap-index.xml', '/wp-sitemap.xml']) add(path);
+
+  for (const candidate of candidates.slice(0, 6)) {
+    try {
+      const res = await fetchText(candidate, { userAgent: BROWSER_UA, timeout: 7000 });
+      if (!res.ok) continue;
+      const body = res.body || '';
+      if (/<sitemapindex[\s>]/i.test(body)) {
+        for (const child of sitemapChildren(body, res.url || candidate)) {
+          const childRes = await fetchText(child, { userAgent: BROWSER_UA, timeout: 7000 });
+          if (!childRes.ok) continue;
+          const urls = parseSitemapUrls(childRes.body, childRes.url || child);
+          if (urls.length) return { sourceUrl: candidate, urls };
+        }
+      } else if (/<urlset[\s>]/i.test(body)) {
+        const urls = parseSitemapUrls(body, res.url || candidate);
+        if (urls.length) return { sourceUrl: candidate, urls };
+      }
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+async function crawlFromCandidates(candidates, friend) {
+  const selected = candidates.slice(0, CRAWL_MAX_ITEMS);
+  const metaResults = await Promise.all(
+    selected.slice(0, CRAWL_FETCH_PAGES).map(async (candidate) => {
       try {
-        feedResponse = await fetchText(feedUrl, { userAgent: UA, headers });
-      } catch (e) {
-        // 订阅地址可能已经失效，重新发现一次
-        discovered = await discoverFeed(friend.url);
-        feedUrl = discovered.feedUrl;
-        feedResponse = discovered;
+        const page = await fetchText(candidate.url, {
+          userAgent: BROWSER_UA,
+          timeout: 6000,
+          headers: { Accept: 'text/html,application/xhtml+xml' },
+        });
+        if (!page.ok) return null;
+        return extractPageMeta(page.body, candidate.url, candidate.title);
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  const items = [];
+  const seen = new Set();
+  for (const [index, candidate] of selected.entries()) {
+    let title = candidate.title || '';
+    let summary = '';
+    let published = dateFromUrl(candidate.url);
+    if (!Number.isFinite(published) && candidate.lastmod) published = Date.parse(candidate.lastmod);
+    if (!Number.isFinite(published)) published = now();
+    const meta = metaResults[index];
+    if (meta) {
+      if (meta.title) title = meta.title;
+      if (meta.description) summary = meta.description;
+      if (Number.isFinite(meta.published_at)) published = meta.published_at;
+    }
+
+    if (!title) {
+      try {
+        const path = new URL(candidate.url).pathname;
+        const tail = decodeURIComponent(path.split('/').filter(Boolean).pop() || '')
+          .replace(/\.html?$/i, '')
+          .replace(/[-_]+/g, ' ')
+          .trim();
+        title = tail || '未命名文章';
+      } catch {
+        title = '未命名文章';
       }
     }
+    if (seen.has(candidate.url)) continue;
+    seen.add(candidate.url);
+    items.push({
+      title: title.slice(0, 200),
+      link: candidate.url,
+      author: friend.title || '',
+      avatar: friend.avatar || '',
+      summary: summary.slice(0, 220),
+      published_at: Math.min(published, now()),
+    });
+  }
+  return items;
+}
 
-    if (feedResponse.status === 304) {
-      await dbRun(
-        env,
-        `UPDATE friends SET last_fetched_at = ?, last_error = NULL, fail_count = 0,
-           next_fetch_at = ?, updated_at = ? WHERE id = ?`,
-        t, next, t, friend.id
-      );
-      return { ok: true, friend_id: friend.id, not_modified: true, count: 0 };
-    }
-    if (!feedResponse.ok) throw new Error(`订阅返回 HTTP ${feedResponse.status}`);
-    if (!looksLikeFeed(feedResponse.body)) throw new Error('返回内容不是 RSS/Atom');
+async function crawlFriendSite(friend, preferred = 'auto') {
+  const t = now();
+  let sitemapError = '';
 
-    const items = parseFeed(feedResponse.body, feedUrl, friend);
-    let inserted = 0;
-    if (items.length) {
-      const stmts = items.map((item) =>
-        env.DB.prepare(
-          `INSERT OR IGNORE INTO feed_articles
-             (friend_id, title, link, author, avatar, summary, published_at, fetched_at)
-           VALUES (?,?,?,?,?,?,?,?)`
-        ).bind(
-          friend.id, item.title, item.link, item.author, item.avatar, item.summary, item.published_at, t
-        )
-      );
-      try {
-        await env.DB.batch(stmts);
-        inserted = items.length;
-      } catch {
-        for (const s of stmts) {
-          try { await s.run(); inserted++; } catch { /* duplicate */ }
+  if (preferred !== 'html') {
+    try {
+      const sitemap = await discoverSitemap(friend.url);
+      if (sitemap) {
+        const urls = sitemap.urls
+          .filter((entry) => !shouldSkipCrawlLink(entry.url, friend.url))
+          .map((entry) => ({
+            ...entry,
+            title: '',
+            score: linkScore(entry.url, '', friend.url, entry.lastmod),
+          }))
+          .filter((entry) => entry.score > 0)
+          .sort((a, b) => (Date.parse(b.lastmod) || 0) - (Date.parse(a.lastmod) || 0))
+          .slice(0, CRAWL_MAX_ITEMS);
+        if (urls.length) {
+          const items = await crawlFromCandidates(urls, friend);
+          if (items.length) return { mode: 'sitemap', sourceUrl: sitemap.sourceUrl, items, at: t };
         }
       }
+    } catch (e) {
+      sitemapError = String(e?.message || e);
+    }
+  }
+
+  try {
+    const home = await fetchText(friend.url, { userAgent: BROWSER_UA, timeout: 12000 });
+    if (!home.ok) throw new Error(`主页返回 HTTP ${home.status}`);
+    const candidates = extractArticleLinks(home.body, home.url || friend.url);
+    if (!candidates.length) throw new Error('主页没有找到可识别的文章链接');
+    const items = await crawlFromCandidates(candidates, friend);
+    if (!items.length) throw new Error('没有解析到文章元数据');
+    return { mode: 'html', sourceUrl: home.url || friend.url, items, at: t };
+  } catch (e) {
+    const htmlError = String(e?.message || e);
+    throw new Error(sitemapError ? `${sitemapError}；${htmlError}` : htmlError);
+  }
+}
+
+
+async function insertArticles(env, friend, items, t) {
+  if (!items.length) return 0;
+  let inserted = 0;
+  const stmts = items.map((item) =>
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO feed_articles
+         (friend_id, title, link, author, avatar, summary, published_at, fetched_at)
+       VALUES (?,?,?,?,?,?,?,?)`
+    ).bind(
+      friend.id, item.title, item.link, item.author, item.avatar, item.summary, item.published_at, t
+    )
+  );
+  try {
+    const results = await env.DB.batch(stmts);
+    inserted = results.reduce((sum, result) => sum + Number(result?.meta?.changes || 0), 0);
+  } catch {
+    for (const statement of stmts) {
+      try {
+        const result = await statement.run();
+        inserted += Number(result?.meta?.changes || 0);
+      } catch { /* duplicate / bad row */ }
+    }
+  }
+  return inserted;
+}
+
+async function refreshFriend(env, friend) {
+  const t = now();
+  const feedNext = t + 45 * 60 * 1000;
+  const crawlNext = t + 90 * 60 * 1000;
+  let feedUrl = friend.feed_url || '';
+  const feedKind = friend.feed_kind || 'feed';
+  let feedError = '';
+
+  if (feedKind === 'feed') {
+    let feedResponse = null;
+    try {
+      if (!feedUrl) {
+        const discovered = await discoverFeed(friend.url);
+        feedUrl = discovered.feedUrl;
+        feedResponse = discovered;
+      } else {
+        const headers = {};
+        if (friend.etag) headers['If-None-Match'] = friend.etag;
+        if (friend.last_modified) headers['If-Modified-Since'] = friend.last_modified;
+        feedResponse = await fetchText(feedUrl, { userAgent: UA, headers });
+      }
+    } catch (e) {
+      feedError = clampStr(String(e?.message || e), 200) || '订阅抓取失败';
+      feedResponse = null;
     }
 
+    // 已有订阅地址失效时，再尝试重新发现一次
+    if (!feedResponse && feedUrl) {
+      try {
+        const discovered = await discoverFeed(friend.url);
+        feedUrl = discovered.feedUrl;
+        feedResponse = discovered;
+        feedError = '';
+      } catch (e) {
+        feedError = clampStr(String(e?.message || e), 200) || feedError;
+      }
+    }
+
+    if (feedResponse) {
+      if (feedResponse.status === 304) {
+        await dbRun(
+          env,
+          `UPDATE friends SET last_fetched_at = ?, last_error = NULL, fail_count = 0,
+             feed_kind = 'feed', next_fetch_at = ?, updated_at = ? WHERE id = ?`,
+          t, feedNext, t, friend.id
+        );
+        return { ok: true, friend_id: friend.id, mode: 'feed', not_modified: true, count: 0 };
+      }
+      if (!feedResponse.ok) {
+        feedError = `订阅返回 HTTP ${feedResponse.status}`;
+      } else if (!looksLikeFeed(feedResponse.body)) {
+        feedError = '返回内容不是 RSS/Atom';
+      } else {
+        const items = parseFeed(feedResponse.body, feedUrl, friend);
+        const inserted = await insertArticles(env, friend, items, t);
+        await dbRun(
+          env,
+          `UPDATE friends SET feed_url = ?, feed_kind = 'feed', etag = ?, last_modified = ?,
+             last_fetched_at = ?, last_error = NULL, fail_count = 0, next_fetch_at = ?, updated_at = ?
+           WHERE id = ?`,
+          feedUrl,
+          feedResponse.etag || null,
+          feedResponse.lastModified || null,
+          t,
+          feedNext,
+          t,
+          friend.id
+        );
+        return {
+          ok: true,
+          friend_id: friend.id,
+          mode: 'feed',
+          feed_url: feedUrl,
+          count: items.length,
+          inserted,
+        };
+      }
+    }
+  }
+
+  // 没有 RSS/Atom、或订阅已失效：尝试 sitemap → 首页 HTML
+  try {
+    const crawl = await crawlFriendSite(friend, feedKind === 'html' ? 'html' : 'auto');
+    const inserted = await insertArticles(env, friend, crawl.items, t);
     await dbRun(
       env,
-      `UPDATE friends SET feed_url = ?, etag = ?, last_modified = ?, last_fetched_at = ?,
-         last_error = NULL, fail_count = 0, next_fetch_at = ?, updated_at = ? WHERE id = ?`,
-      feedUrl,
-      feedResponse.etag || null,
-      feedResponse.lastModified || null,
+      `UPDATE friends SET feed_url = ?, feed_kind = ?, etag = NULL, last_modified = NULL,
+         last_fetched_at = ?, last_error = NULL, fail_count = 0, next_fetch_at = ?, updated_at = ?
+       WHERE id = ?`,
+      crawl.sourceUrl,
+      crawl.mode,
       t,
-      next,
+      crawlNext,
       t,
       friend.id
     );
-    return { ok: true, friend_id: friend.id, feed_url: feedUrl, count: items.length, inserted };
+    return {
+      ok: true,
+      friend_id: friend.id,
+      mode: crawl.mode,
+      source: crawl.sourceUrl,
+      count: crawl.items.length,
+      inserted,
+    };
   } catch (e) {
-    const message = clampStr(e?.message || e, 300) || '抓取失败';
+    const crawlError = clampStr(String(e?.message || e), 200) || '爬取失败';
+    const message = clampStr(
+      feedError ? `${feedError}；爬取失败：${crawlError}` : `爬取失败：${crawlError}`,
+      300
+    );
     const failCount = Number(friend.fail_count || 0) + 1;
     const backoff = Math.min(failCount, 5) * 30 * 60 * 1000;
     await dbRun(
@@ -1352,4 +1756,10 @@ export const __test = {
   stripHtml,
   decodeEntities,
   formatDateCN,
+  extractArticleLinks,
+  extractPageMeta,
+  parseSitemapUrls,
+  dateFromUrl,
+  linkScore,
+  shouldSkipCrawlLink,
 };

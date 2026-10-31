@@ -2,6 +2,7 @@ package top.lvbyte.hexstudio.core
 
 import android.content.Context
 import top.lvbyte.hexstudio.data.DraftStore
+import top.lvbyte.hexstudio.data.RepoCache
 import top.lvbyte.hexstudio.data.SecureStore
 import top.lvbyte.hexstudio.data.SettingsStore
 import top.lvbyte.hexstudio.data.github.DeviceFlowClient
@@ -18,4 +19,5 @@ class AppContainer(context: Context) {
     val studio = StudioClient(settings, secure)
     val imageBed = ImageBedClient(appContext, settings, secure)
     val drafts = DraftStore(appContext)
+    val repoCache = RepoCache(appContext)
 }

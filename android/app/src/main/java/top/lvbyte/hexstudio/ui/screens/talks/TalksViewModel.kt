@@ -28,6 +28,7 @@ import top.lvbyte.hexstudio.data.model.Talk
 import top.lvbyte.hexstudio.data.model.TalkImport
 import top.lvbyte.hexstudio.data.model.UpdateTalkRequest
 import top.lvbyte.hexstudio.data.sharedHttpClient
+import top.lvbyte.hexstudio.util.TalkTags
 
 data class TalksState(
     val loading: Boolean = true,
@@ -205,15 +206,7 @@ class TalksViewModel(private val container: AppContainer) : ViewModel() {
             .trim()
     }
 
-    fun extractTags(content: String): List<String> {
-        val regex = Regex("""(^|[\s([（])#([\p{L}\p{N}_-]{1,30})""")
-        return regex.findAll(content)
-            .map { it.groupValues[2] }
-            .filter { it.isNotBlank() && it != "SFCN" }
-            .distinct()
-            .take(10)
-            .toList()
-    }
+    fun extractTags(content: String): List<String> = TalkTags.extract(content)
 
     fun clearMessage() = _state.update { it.copy(message = null) }
 

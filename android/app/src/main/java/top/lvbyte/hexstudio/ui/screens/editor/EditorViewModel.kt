@@ -195,6 +195,7 @@ class EditorViewModel(
                     sha = current.sha
                 )
                 container.drafts.delete(settings.repoFullName, current.path)
+                container.repoCache.invalidateTrees()
                 _state.update {
                     it.copy(
                         saving = false,

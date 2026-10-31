@@ -99,6 +99,14 @@ fun EditorScreen(
     var showDiscard by rememberSaveable { mutableStateOf(false) }
     var commitMessage by rememberSaveable { mutableStateOf("") }
 
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    val codeBackground = MaterialTheme.colorScheme.surfaceVariant
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val highlightTransformation = remember(primary, secondary, codeBackground, muted) {
+        MarkdownHighlightTransformation(primary, secondary, codeBackground, muted)
+    }
+
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(9)
     ) { uris ->
@@ -210,7 +218,7 @@ fun EditorScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 14.dp)
+                        .padding(horizontal = 16.dp)
                         .imePadding()
                 ) {
                     Spacer(Modifier.height(6.dp))
@@ -278,7 +286,6 @@ fun EditorScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxWidth()
-                                    .verticalScroll(rememberScrollState())
                                     .padding(12.dp)
                             ) {
                                 if (editorValue.text.isEmpty()) {
@@ -297,7 +304,7 @@ fun EditorScreen(
                                             vm.setBody(value.text)
                                         }
                                     },
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier.fillMaxSize(),
                                     textStyle = TextStyle(
                                         fontFamily = FontFamily.Monospace,
                                         fontSize = 14.sp,
@@ -305,12 +312,7 @@ fun EditorScreen(
                                         color = MaterialTheme.colorScheme.onSurface
                                     ),
                                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                    visualTransformation = MarkdownHighlightTransformation(
-                                        primary = MaterialTheme.colorScheme.primary,
-                                        secondary = MaterialTheme.colorScheme.secondary,
-                                        codeBackground = MaterialTheme.colorScheme.surfaceVariant,
-                                        muted = MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
+                                    visualTransformation = highlightTransformation,
                                     keyboardOptions = KeyboardOptions(
                                         capitalization = KeyboardCapitalization.None,
                                         autoCorrectEnabled = false

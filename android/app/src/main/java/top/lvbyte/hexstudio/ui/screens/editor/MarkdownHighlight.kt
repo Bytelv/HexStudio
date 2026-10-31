@@ -16,8 +16,15 @@ class MarkdownHighlightTransformation(
     private val muted: Color
 ) : VisualTransformation {
 
+    private var cachedText: String? = null
+    private var cachedResult: AnnotatedString? = null
+
     override fun filter(text: AnnotatedString): TransformedText {
         val raw = text.text
+        val cached = cachedResult
+        if (raw == cachedText && cached != null) {
+            return TransformedText(cached, OffsetMapping.Identity)
+        }
         val builder = AnnotatedString.Builder(raw)
 
         fun addStyle(start: Int, end: Int, style: SpanStyle) {
@@ -48,6 +55,9 @@ class MarkdownHighlightTransformation(
         val quoteStyle = SpanStyle(color = muted)
         Regex("""(?m)^>.*$""").findAll(raw).forEach { addStyle(it.range.first, it.range.last + 1, quoteStyle) }
 
-        return TransformedText(builder.toAnnotatedString(), OffsetMapping.Identity)
+        val result = builder.toAnnotatedString()
+        cachedText = raw
+        cachedResult = result
+        return TransformedText(result, OffsetMapping.Identity)
     }
 }

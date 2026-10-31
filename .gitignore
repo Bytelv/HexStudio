@@ -17,3 +17,6 @@ worker/.local/
 .dev.vars
 .env
 *.log
+
+keystore.properties
+android/hexstudio-release.jks

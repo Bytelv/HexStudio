@@ -17,7 +17,7 @@
 | Cloudflare Worker API | `worker/` | **已部署**：<https://studio.4123010.xyz> |
 | D1 数据库 | Cloudflare `lvbyte-studio-db` | 已建表，已迁移 34 条友链、11 条说说 |
 | 朋友圈抓取 Cron | Worker `* * * * *` | 已运行，`/feeds` 已抓到真实文章 |
-| Android APK | `android/` | Debug APK 已构建，单元测试通过 |
+| Android APK | `android/` | Debug 20MB / Release 2.2MB，单元测试与 lint 通过 |
 | 博客友链/说说/朋友圈 | `I:\MyBlogSource` | 已本地提交，**尚未 push**（push 即上线） |
 
 线上接口：
@@ -108,8 +108,18 @@ $env:JAVA_HOME="$HOME\.jdks\jdk-17.0.20.1+1"
 产物：
 
 ```
-android/app/build/outputs/apk/debug/app-debug.apk
+android/app/build/outputs/apk/debug/app-debug.apk      # 保留调试数据，适合覆盖测试
+android/app/build/outputs/apk/release/app-release.apk  # R8 + 资源压缩，日常使用
 ```
+
+Release 包使用本机 `android/keystore.properties`（已加入 .gitignore）签名；没有该文件时会回退 debug 签名。Release 的 applicationId 是 `top.lvbyte.hexstudio`，与 debug 的 `.debug` 后缀不同，首次安装需要重新登录。
+
+### 性能与缓存
+
+- 仓库文件树持久化缓存 15 分钟，冷启动先显示缓存，后台过期刷新；内容页切 Tab 不会重复读仓库。
+- 编辑提交/新建文章后会主动失效缓存。
+- Release 开启 R8 和资源压缩；友链头像改用 `AsyncImage`，避免列表里的 subcomposition。
+- 说说标签解析已抽到 `TalkTags`，有单元测试锁定 `[` 转义，避免再次出现 `PatternSyntaxException` 闪退。
 
 单元测试：
 
@@ -165,7 +175,7 @@ npx wrangler secret put IP_SALT
 - 支持 RSS 2.0 / Atom；失败会记录 `last_error` 并退避。
 - 某个站点一直失败时，在 APK 友链编辑里手动填 RSS 地址。
 - 免费 Worker 计划下这个频率足够 30~40 个友链，约半小时轮完一轮。
-- 2026-10-31 运行现状：34 个友链里 20 个已自动发现订阅，已抓约 320 篇文章；其余 14 个站点返回 403/404/526，需要在 APK 的友链编辑里手动填订阅地址。
+- 2026-10-31 运行现状：34 个友链里 20 个自动发现 RSS，2 个通过 HTML 爬取补上（陈YF、安子璠），已抓 330+ 篇文章；其余 12 个站点返回 403/404/526 或是 JS 渲染，APK 会显示失败原因，可手动填订阅地址。
 
 ---
 

@@ -68,6 +68,41 @@ assert.ok(candidates.includes('https://cdn.example.com/atom.xml'));
 assert.equal(__test.decodeEntities('a &amp; b &#x1F600;'), 'a & b 😀');
 assert.equal(__test.stripHtml('<p>Hello</p><script>bad()</script>world'), 'Hello world');
 
+const sampleHtml = `<!doctype html><html><head>
+<title>Site Name</title>
+<meta property="og:title" content="Crawled Post">
+<meta property="article:published_time" content="2026-10-30T10:00:00+08:00">
+<meta name="description" content="A crawled summary">
+</head><body>
+<nav><a href="/about">About</a><a href="/tags/tech">Tech</a><a href="https://other.example/x">External</a></nav>
+<article><h2><a href="/posts/hello-world">Hello World</a></h2></article>
+<a href="/2026/10/30/another-post">Another Post</a>
+<a href="/?p=123">WordPress Post</a>
+</body></html>`;
+const crawled = __test.extractArticleLinks(sampleHtml, 'https://example.com/');
+const crawledUrls = crawled.map((item) => item.url);
+assert.ok(crawledUrls.includes('https://example.com/posts/hello-world'));
+assert.ok(crawledUrls.includes('https://example.com/2026/10/30/another-post'));
+assert.ok(crawledUrls.includes('https://example.com/?p=123'));
+assert.ok(!crawledUrls.includes('https://example.com/about'));
+assert.ok(!crawledUrls.includes('https://example.com/tags/tech'));
+assert.ok(!crawledUrls.some((url) => url.includes('other.example')));
+
+const meta = __test.extractPageMeta(sampleHtml, 'https://example.com/posts/hello-world');
+assert.equal(meta.title, 'Crawled Post');
+assert.equal(meta.description, 'A crawled summary');
+assert.ok(meta.published_at > 0);
+
+const sitemap = `<?xml version="1.0"?><urlset><url><loc>https://example.com/posts/a</loc><lastmod>2026-10-29</lastmod></url><url><loc>https://example.com/about</loc></url></urlset>`;
+const sitemapUrls = __test.parseSitemapUrls(sitemap, 'https://example.com/');
+assert.equal(sitemapUrls.length, 2);
+assert.equal(sitemapUrls[0].url, 'https://example.com/posts/a');
+assert.equal(sitemapUrls[0].lastmod, '2026-10-29');
+
+const dated = __test.dateFromUrl('https://example.com/2026/10/30/post');
+assert.ok(Number.isFinite(dated));
+assert.equal(new Date(dated).toISOString().slice(0, 10), '2026-10-30');
+
 console.log('parser tests passed', {
   rss: rssItems.length,
   atom: atomItems.length,

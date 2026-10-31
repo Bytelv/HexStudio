@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS friends (
   description TEXT NOT NULL DEFAULT '',
   keywords TEXT NOT NULL DEFAULT '',
   feed_url TEXT,
+  feed_kind TEXT NOT NULL DEFAULT 'feed',
   feed_enabled INTEGER NOT NULL DEFAULT 1,
   visible INTEGER NOT NULL DEFAULT 1,
   sort INTEGER NOT NULL DEFAULT 0,

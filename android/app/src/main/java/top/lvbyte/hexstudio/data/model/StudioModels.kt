@@ -42,6 +42,7 @@ data class Friend(
     val description: String = "",
     val keywords: String = "",
     @SerialName("feed_url") val feedUrl: String? = null,
+    @SerialName("feed_kind") val feedKind: String = "feed",
     @SerialName("feed_enabled") val feedEnabled: Boolean = true,
     val visible: Boolean = true,
     val sort: Int = 0,
@@ -98,6 +99,7 @@ data class FeedStatus(
     val title: String,
     val url: String,
     @SerialName("feed_url") val feedUrl: String? = null,
+    @SerialName("feed_kind") val feedKind: String = "feed",
     @SerialName("feed_enabled") val feedEnabled: Boolean = true,
     @SerialName("last_error") val lastError: String? = null,
     @SerialName("fail_count") val failCount: Int = 0,
@@ -135,6 +137,7 @@ data class CreateFriendRequest(
     val description: String = "",
     val keywords: String = "",
     @SerialName("feed_url") val feedUrl: String? = null,
+    @SerialName("feed_kind") val feedKind: String = "feed",
     @SerialName("feed_enabled") val feedEnabled: Boolean = true,
     val visible: Boolean = true
 )
