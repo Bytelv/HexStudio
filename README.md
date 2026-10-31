@@ -6,6 +6,8 @@
 
 用手機管理 `blog.lvbyte.top` 的 Hexo 源码、发布说说、审批友链，并让网站直接读取 Cloudflare 上的数据。
 
+> 项目目录：`I:\HexStudio`；Qoder 工作区里的 `HexStudio` 是指向它的 junction。
+
 ---
 
 ## 1. 现在有什么
@@ -49,7 +51,7 @@ Worker 的 `ADMIN_GITHUB_LOGIN` 为 `Bytelv`；只有这个 GitHub 账号能换�
 
 - `source/friend/index.md`：友链 API 换成 Worker；申请表单改成自建表单。
 - `source/friend/rss/index.md`：朋友圈 API 换成 `/feeds`。
-- `source/talks/index.md`：新的 flomo 风格说说页。
+- `source/talks/index.md`：普通时间线说说页（网站不采用 flomo 风格）。
 - `source/timeline/index.html`：旧链接静态重定向到 `/talks/`。
 - 菜单位置「说说」、页脚、robots 已同步。
 
@@ -60,7 +62,7 @@ Worker 的 `ADMIN_GITHUB_LOGIN` 为 `Bytelv`；只有这个 GitHub 账号能换�
 - 文章/页面/配置浏览与 Markdown 编辑，front-matter 属性编辑。
 - Stellar 标签插入面板、闭合校验、离线 HTML 预览（marked + DOMPurify）。
 - 图床 API 上传（HTTP Basic），支持 Markdown 或 `{% image %}` 插入。
-- 说说：flomo 卡片流、发布/编辑/删除、tgtalk JSON 导入（可选图片转存）。
+- 说说：flomo 式极简编辑页 + 卡片流、发布/编辑/删除、tgtalk JSON 导入（可选图片转存）。
 - 友链：待审核、通过/拒绝、编辑、抓取状态、通知角标。
 - WorkManager 每 15 分钟轮询通知；打开 App 立即同步。
 
@@ -179,7 +181,7 @@ npx wrangler secret put IP_SALT
 ## 7. 已知限制 / 下一步
 
 1. **模拟器运行被 BIOS 虚拟化挡住**  
-   本机 `VirtualizationFirmwareEnabled=False`，AVD `LvbyteATD` 已创建，但 emulator 在软件加速下启动即崩溃。  
+   本机 `VirtualizationFirmwareEnabled=False`，AVD `HexStudioATD` 已创建，但 emulator 在软件加速下启动即崩溃。  
    需要在 BIOS 开启 AMD SVM（AMD-V / Virtualization），或在手机上用 USB 调试安装 debug APK。构建和 JVM 单元测试均已通过。
 2. **Stellar 预览是近似渲染**  
    APK 内置 marked + DOMPurify + 自写标签渲染器，覆盖 note/folding/tabs/grid/timeline/image/frame/button/link/copy/inline 等常用标签；最终效果以 Hexo 构建为准。
