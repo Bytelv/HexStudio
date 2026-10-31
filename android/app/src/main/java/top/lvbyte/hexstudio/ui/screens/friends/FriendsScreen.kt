@@ -410,6 +410,10 @@ private fun FriendsTab(friends: List<Friend>, onEdit: (Friend) -> Unit) {
                                 Spacer(Modifier.padding(horizontal = 4.dp))
                                 StatusPill("隐藏", MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+                            if (!friend.alive) {
+                                Spacer(Modifier.padding(horizontal = 4.dp))
+                                StatusPill("无法访问", MaterialTheme.colorScheme.error)
+                            }
                         }
                         Text(
                             friend.url,
@@ -418,6 +422,15 @@ private fun FriendsTab(friends: List<Friend>, onEdit: (Friend) -> Unit) {
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        if (!friend.alive && !friend.healthError.isNullOrBlank()) {
+                            Text(
+                                "检测失败：${friend.healthError}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         if (!friend.lastError.isNullOrBlank()) {
                             Text(
                                 "抓取失败：${friend.lastError}",

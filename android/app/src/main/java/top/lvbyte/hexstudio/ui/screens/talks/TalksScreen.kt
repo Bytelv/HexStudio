@@ -1,9 +1,17 @@
 package top.lvbyte.hexstudio.ui.screens.talks
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.SolidColor
@@ -71,6 +79,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,6 +104,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import top.lvbyte.hexstudio.core.AppContainer
 import top.lvbyte.hexstudio.data.model.Talk
@@ -116,6 +126,11 @@ fun TalksScreen(container: AppContainer) {
     var showImport by rememberSaveable { mutableStateOf(false) }
     var previewImage by remember { mutableStateOf<String?>(null) }
     var toDelete by remember { mutableStateOf<Talk?>(null) }
+    var inlineActive by rememberSaveable { mutableStateOf(false) }
+    val inlineText = rememberSaveable { mutableStateOf("") }
+    var composeSeed by rememberSaveable { mutableStateOf("") }
+    var inlineAllowExpand by rememberSaveable { mutableStateOf(true) }
+    val listState = rememberLazyListState()
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         if (!state.loading) vm.load()
@@ -158,16 +173,36 @@ fun TalksScreen(container: AppContainer) {
                 )
                 else -> LazyColumn(
                     modifier = Modifier.fillMaxSize(),
+                    state = listState,
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                     contentPadding = PaddingValues(
                         start = 16.dp, end = 16.dp, top = 4.dp, bottom = 32.dp
                     )
                 ) {
                     item(key = "composer") {
-                        NenoComposerCard(
-                            onClick = {
+                        NenoInlineComposer(
+                            active = inlineActive,
+                            textState = inlineText,
+                            allowAutoExpand = inlineAllowExpand,
+                            onActivate = {
+                                inlineActive = true
+                                inlineAllowExpand = true
+                                scope.launch {
+                                    delay(80)
+                                    listState.animateScrollToItem(0)
+                                }
+                            },
+                            onExpand = {
+                                composeSeed = inlineText.value
+                                inlineActive = false
                                 editing = null
                                 showCompose = true
+                            },
+                            onPublish = { text -> vm.publish(text, emptyList(), null) },
+                            onPublished = {
+                                inlineText.value = ""
+                                inlineActive = false
+                                inlineAllowExpand = true
                             }
                         )
                     }
@@ -178,6 +213,7 @@ fun TalksScreen(container: AppContainer) {
                             NenoTalkItem(
                                 talk = talk,
                                 onEdit = {
+                                    composeSeed = ""
                                     editing = talk
                                     showCompose = true
                                 },
@@ -200,8 +236,21 @@ fun TalksScreen(container: AppContainer) {
         TalkComposeDialog(
             vm = vm,
             editing = editing,
-            onDismiss = {
+            initialContent = editing?.content ?: composeSeed,
+            initialImages = editing?.images ?: emptyList(),
+            onDismiss = { published, finalText ->
                 showCompose = false
+                if (published) {
+                    inlineText.value = ""
+                    composeSeed = ""
+                    inlineActive = false
+                    inlineAllowExpand = true
+                } else if (editing == null && finalText.isNotBlank()) {
+                    inlineText.value = finalText
+                    composeSeed = ""
+                    inlineActive = true
+                    inlineAllowExpand = false
+                }
                 editing = null
             }
         )
@@ -291,46 +340,217 @@ private fun nenoHighlight(content: String): AnnotatedString {
 }
 
 @Composable
-private fun NenoComposerCard(onClick: () -> Unit) {
+private fun NenoInlineComposer(
+    active: Boolean,
+    textState: MutableState<String>,
+    allowAutoExpand: Boolean,
+    onActivate: () -> Unit,
+    onExpand: () -> Unit,
+    onPublish: suspend (String) -> String?,
+    onPublished: () -> Unit
+) {
+    val text = textState.value
+    val accent = nenoAccent()
+    val onAccent = nenoOnAccent()
+    val scope = rememberCoroutineScope()
+    val focusRequester = remember { FocusRequester() }
+    val scrollState = rememberScrollState()
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var lineCount by remember { mutableIntStateOf(1) }
+
+    LaunchedEffect(active) {
+        if (active) {
+            delay(120)
+            runCatching { focusRequester.requestFocus() }
+        } else {
+            error = null
+        }
+    }
+
+    LaunchedEffect(active, allowAutoExpand, text, lineCount) {
+        if (!active || !allowAutoExpand || text.isBlank()) return@LaunchedEffect
+        if (lineCount > 7 || text.length > 320) {
+            delay(180)
+            onExpand()
+        }
+    }
+
+    fun submit() {
+        val value = text.trim()
+        if (value.isEmpty() || busy) return
+        scope.launch {
+            busy = true
+            error = null
+            val err = onPublish(value)
+            busy = false
+            if (err == null) {
+                textState.value = ""
+                onPublished()
+            } else {
+                error = err
+            }
+        }
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .animateContentSize(tween(180)),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,
         shadowElevation = 2.dp
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(
-                "现在的想法是…",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f)
-            )
-            Spacer(Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.Tag,
-                    contentDescription = null,
-                    tint = nenoAccent(),
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(Modifier.width(14.dp))
-                Icon(
-                    Icons.Outlined.Image,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(Modifier.weight(1f))
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = nenoAccent()
+            if (!active) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onActivate)
                 ) {
                     Text(
-                        "写说说",
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = nenoOnAccent()
+                        if (text.isBlank()) "现在的想法是…" else text,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (text.isBlank()) {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.Tag,
+                            contentDescription = null,
+                            tint = accent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(14.dp))
+                        Icon(
+                            Icons.Outlined.Image,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Surface(shape = RoundedCornerShape(10.dp), color = accent) {
+                            Text(
+                                "写说说",
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = onAccent
+                            )
+                        }
+                    }
+                }
+            } else {
+                BasicTextField(
+                    value = text,
+                    onValueChange = { if (it.length <= 5000) textState.value = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 64.dp, max = 186.dp)
+                        .verticalScroll(scrollState)
+                        .focusRequester(focusRequester),
+                    textStyle = TextStyle(
+                        fontSize = 17.sp,
+                        lineHeight = 27.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    cursorBrush = SolidColor(accent),
+                    onTextLayout = { lineCount = it.lineCount },
+                    decorationBox = { inner ->
+                        Box {
+                            if (text.isEmpty()) {
+                                Text(
+                                    "现在的想法是…",
+                                    fontSize = 17.sp,
+                                    lineHeight = 27.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                            }
+                            inner()
+                        }
+                    }
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        enabled = !busy,
+                        onClick = {
+                            textState.value =
+                                if (text.isBlank() || text.endsWith(" ")) "$text#" else "$text #"
+                            runCatching { focusRequester.requestFocus() }
+                        },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.Tag,
+                            contentDescription = "插入标签",
+                            tint = accent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        enabled = !busy,
+                        onClick = onExpand,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.Image,
+                            contentDescription = "添加图片",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        enabled = !busy,
+                        onClick = onExpand,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.OpenInFull,
+                            contentDescription = "展开编辑器",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "${text.length}/5000",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Button(
+                        enabled = text.isNotBlank() && !busy,
+                        onClick = ::submit,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = accent,
+                            contentColor = onAccent
+                        ),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        if (busy) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = onAccent
+                            )
+                        } else {
+                            Text("发布", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+                if (!error.isNullOrBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        error ?: "",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
             }
@@ -484,14 +704,17 @@ private fun TalkImages(images: List<String>, onClick: (String) -> Unit) {
 private fun TalkComposeDialog(
     vm: TalksViewModel,
     editing: Talk?,
-    onDismiss: () -> Unit
+    initialContent: String,
+    initialImages: List<String>,
+    onDismiss: (published: Boolean, finalContent: String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var content by rememberSaveable { mutableStateOf(editing?.content ?: "") }
-    var images by remember { mutableStateOf(editing?.images ?: emptyList()) }
+    var content by rememberSaveable(editing?.id, initialContent) { mutableStateOf(initialContent) }
+    var images by remember(editing?.id, initialImages) { mutableStateOf(initialImages) }
     var busy by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var entered by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val timestamp = remember(editing?.id) { editing?.createdAt ?: System.currentTimeMillis() }
     val dateLabel = remember(timestamp) {
@@ -529,19 +752,25 @@ private fun TalkComposeDialog(
             error = null
             val err = vm.publish(content.trim(), images, editing?.id)
             busy = false
-            if (err == null) onDismiss() else error = err
+            if (err == null) onDismiss(true, content) else error = err
         }
     }
 
     LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(200)
+        entered = true
+        delay(200)
         runCatching { focusRequester.requestFocus() }
     }
 
     Dialog(
-        onDismissRequest = { if (!busy) onDismiss() },
+        onDismissRequest = { if (!busy) onDismiss(false, content) },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
+        AnimatedVisibility(
+            visible = entered,
+            enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.985f, animationSpec = tween(180)),
+            modifier = Modifier.fillMaxSize()
+        ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
@@ -557,7 +786,7 @@ private fun TalkComposeDialog(
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") }
+                    TextButton(enabled = !busy, onClick = { onDismiss(false, content) }) { Text("取消") }
                     Text(
                         dateLabel,
                         modifier = Modifier.weight(1f),
@@ -778,6 +1007,7 @@ private fun TalkComposeDialog(
                     )
                 }
             }
+        }
         }
     }
 }

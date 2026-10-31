@@ -49,7 +49,10 @@ data class Friend(
     @SerialName("last_fetched") val lastFetched: String? = null,
     @SerialName("last_error") val lastError: String? = null,
     @SerialName("fail_count") val failCount: Int = 0,
-    @SerialName("next_fetch") val nextFetch: String? = null
+    @SerialName("next_fetch") val nextFetch: String? = null,
+    val alive: Boolean = true,
+    @SerialName("health_checked_at") val healthCheckedAt: Long = 0,
+    @SerialName("health_error") val healthError: String = ""
 )
 
 @Serializable

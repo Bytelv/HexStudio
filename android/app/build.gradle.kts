@@ -22,8 +22,8 @@ android {
         applicationId = "top.lvbyte.hexstudio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.2.1"
 
         buildConfigField("String", "DEFAULT_API_BASE", "\"https://studio.4123010.xyz\"")
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"Ov23lizGC0TUk86kapjg\"")

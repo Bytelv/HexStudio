@@ -1,6 +1,6 @@
 {
-  "versionCode": 3,
-  "versionName": "1.2.0",
-  "downloadUrl": "https://raw.githubusercontent.com/Bytelv/HexStudio/main/release/HexStudio-1.2.0.apk",
-  "changelog": "说说页改为 NENO 风格：卡片笔记、绿色标签和顶部输入框。\n设置里新增检查更新，启动时也会自动提示新版本。\n修复说说编辑闪退，仓库加载改用本地缓存。"
+  "versionCode": 4,
+  "versionName": "1.2.1",
+  "downloadUrl": "https://raw.githubusercontent.com/Bytelv/HexStudio/main/release/HexStudio-1.2.1.apk",
+  "changelog": "说说输入改为在当前页面直接展开，随文字增高，超过 7 行自动进入全屏编辑器。\n友链列表显示无法访问状态和检测原因。\n工作台继续修复朋友圈文章按真实发布时间排序。"
 }
