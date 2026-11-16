@@ -139,6 +139,7 @@ jobs:
           VERSION_NAME: ${{ needs.build.outputs.version_name }}
           VERSION_CODE: ${{ needs.build.outputs.version_code }}
           REPO: ${{ github.repository }}
+          BUILD_SHA: ${{ github.sha }}
         run: |
           python3 - <<'PY'
           import json, os, pathlib, subprocess
@@ -146,12 +147,19 @@ jobs:
           version = os.environ['VERSION_NAME']
           code = os.environ['VERSION_CODE']
           repo = os.environ['REPO']
+          sha = os.environ.get('BUILD_SHA', '')
           url = 'https://github.com/' + repo + '/releases/download/v' + version + '/HexStudio-' + version + '.apk'
 
-          log = subprocess.run(
-              ['git', 'log', '-1', '--pretty=%B', 'HEAD~1' if os.environ.get('GITHUB_EVENT_NAME') == 'push' else 'HEAD'],
-              capture_output=True, text=True, check=False)
-          changelog = (log.stdout or '').strip()
+          # changelog 取「这次构建的那条提交」的说明，拿不到就沿用 update.json 里已有的
+          changelog = ''
+          if sha:
+              log = subprocess.run(['git', 'log', '-1', '--pretty=%B', sha], capture_output=True, text=True, check=False)
+              changelog = (log.stdout or '').strip()
+          if not changelog:
+              try:
+                  changelog = json.loads(pathlib.Path('update.json').read_text(encoding='utf-8')).get('changelog', '')
+              except Exception:
+                  changelog = ''
           if not changelog:
               changelog = 'HexStudio ' + version
 
