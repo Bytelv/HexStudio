@@ -25,6 +25,7 @@ import top.lvbyte.hexstudio.data.model.FriendApplication
 import top.lvbyte.hexstudio.data.model.FriendsResponse
 import top.lvbyte.hexstudio.data.model.ImportResult
 import top.lvbyte.hexstudio.data.model.ImportTalksRequest
+import top.lvbyte.hexstudio.data.model.LikesResponse
 import top.lvbyte.hexstudio.data.model.NotificationsResponse
 import top.lvbyte.hexstudio.data.model.ReadNotificationsRequest
 import top.lvbyte.hexstudio.data.model.RefreshFeedsRequest
@@ -146,6 +147,13 @@ class StudioClient(
         parseResult(request("GET", "/admin/notifications?unread=${if (unreadOnly) 1 else 0}&limit=$limit")) {
             parseJson<NotificationsResponse>(it)
         }
+
+    suspend fun likes(limit: Int = 20): LikesResponse =
+        parseResult(request("GET", "/admin/likes?limit=$limit")) { parseJson<LikesResponse>(it) }
+
+    /** 手动触发一次 Waline 评论同步（cron 每 5 分钟也会跑，这里给下拉刷新用） */
+    suspend fun syncComments(): SimpleResponse =
+        parseResult(request("POST", "/admin/comments/sync")) { parseJson<SimpleResponse>(it) }
 
     suspend fun markNotificationsRead(ids: List<Long>): SimpleResponse {
         val body = StudioJson.json.encodeToString(ReadNotificationsRequest(ids = ids))

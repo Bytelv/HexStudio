@@ -11,6 +11,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import top.lvbyte.hexstudio.core.AppContainer
 import top.lvbyte.hexstudio.data.model.GitTreeItem
+import top.lvbyte.hexstudio.data.model.LikesResponse
 import top.lvbyte.hexstudio.data.model.StudioStats
 
 data class HomeState(
@@ -22,6 +23,7 @@ data class HomeState(
     val postCount: Int = 0,
     val pageCount: Int = 0,
     val stats: StudioStats? = null,
+    val likes: LikesResponse? = null,
     val error: String? = null,
     val serviceError: String? = null
 )
@@ -127,11 +129,24 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
             if (statsFresh) {
                 _state.update { it.copy(stats = statsCache, serviceError = null) }
             } else {
+                // 手动下拉刷新时顺手拉一次 Waline 评论（cron 每 5 分钟也会跑）
+                if (force) {
+                    try {
+                        container.studio.syncComments()
+                    } catch (_: Exception) {
+                        // 同步失败不影响下面的统计刷新
+                    }
+                }
                 try {
                     val stats = container.studio.stats()
+                    val likes = try {
+                        container.studio.likes(limit = 10)
+                    } catch (_: Exception) {
+                        _state.value.likes ?: LikesResponse()
+                    }
                     statsCache = stats
                     statsFetchedAt = System.currentTimeMillis()
-                    _state.update { it.copy(stats = stats, serviceError = null) }
+                    _state.update { it.copy(stats = stats, likes = likes, serviceError = null) }
                 } catch (e: Exception) {
                     if (statsCache == null) {
                         _state.update { it.copy(serviceError = "Cloudflare 服务暂时不可用：${friendly(e)}") }

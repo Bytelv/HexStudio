@@ -226,3 +226,70 @@ npx wrangler secret put IP_SALT
 - [marked](https://github.com/markedjs/marked) — MIT，Markdown 渲染
 - [DOMPurify](https://github.com/cure53/DOMPurify) — Apache-2.0 / MPL-2.0，HTML 清洗
 - 许可证文本在 `android/app/src/main/assets/preview/` 与 `THIRD_PARTY_NOTICES.md`。
+
+---
+
+## 9. 点赞与评论提醒（2026-11）
+
+博客首页 / 说说页的「❤ 赞」不再只是本地点亮，改成 Worker + D1 的真实计数；
+评论提醒也收进了同一套通知表，APK 用现有的轮询机制就能收到。
+
+### 9.1 新增接口
+
+```
+GET  /likes?paths=/a/,/b/          批量取点赞数（公开，逗号分隔，最多 50 条）
+POST /likes                         {path, visitor, action:"like"|"unlike"} → {count, liked}
+GET  /admin/likes?limit=20          点赞排行（路径 + 次数 + 最近一次时间）
+POST /admin/comments/sync           手动同步一次 Waline 评论（cron 每 5 分钟也会跑）
+```
+
+- `visitor` 是前端生成的匿名 id（`localStorage` 里的 `lv-visitor-id`），
+  `likes` 表以 `(path, visitor)` 作联合主键，**同一个人对同一路径只算一次**，
+  取消则删行；`ip_hash` 只用于「单 IP 每天最多 300 次点赞」的防刷限额，不对外暴露。
+- 计数只存增量事实（谁赞了哪条），总数靠 `COUNT(*)`，不会出现自增丢数。
+
+### 9.2 评论提醒怎么来的
+
+Waline 1.x **没有通用 webhook**，所以 Worker 的 cron 每 5 分钟拉一次
+`/api/comment?type=recent&count=50`，把新出现的评论（含回复）写进 `notifications`：
+
+- 游标存在 `settings.waline_last_comment_id`，按 `objectId` 递增；
+- **第一次运行只记基线不推送**（否则会把历史评论一次性全推给你）；
+- 只收 `url` 以 `/` 开头的（本站路径），`title` 固定「新的评论」，
+  `data` 里带 `objectId/url/nick/comment/avatar`，APK 点通知会跳到说说页。
+
+### 9.3 上线步骤（改了 Worker 一定要跑）
+
+```powershell
+cd worker
+npm i
+wrangler d1 execute lvbyte-studio-db --remote --file=./migrations/20261116_likes_and_comments.sql
+wrangler deploy
+```
+
+本地自测（不需要 Cloudflare 账号）：
+
+```powershell
+wrangler d1 execute lvbyte-studio-db --local --file=./schema.sql
+wrangler dev --local --port 8787 --compatibility-date 2026-10-30   # 本机 workerd 支持的最新日期比配置小一天
+curl "http://127.0.0.1:8787/likes?paths=/posts/a/"
+```
+
+### 9.4 APK 发布（GitHub Actions）
+
+`.github/workflows/build-apk.yml` 现在做三件事：构建 `assembleRelease` →
+建/更新 `v<versionName>` 的 GitHub Release 并上传 APK → 把 `update.json` 写回 main
+（提交信息带 `[skip ci]`，不会循环触发）。
+
+**必须配 4 个 Secrets 才会真正发 Release**（否则只用 debug 签名构建并只传 artifact——
+debug 签名的包覆盖不了已装的正式版，所以故意不发布）：
+
+| Secret | 说明 |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | 签名库的 base64：`base64 -w0 hexstudio-release.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | storePassword |
+| `ANDROID_KEY_ALIAS` | keyAlias |
+| `ANDROID_KEY_PASSWORD` | keyPassword |
+
+版本号只改 `android/app/build.gradle.kts` 里的 `versionCode` / `versionName`，
+CI 从文件里读，不会两边写岔。

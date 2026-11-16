@@ -8,6 +8,8 @@ workers_dev = false
 SITE_URL = "https://blog.lvbyte.top"
 SITE_NAME = "字节君"
 ADMIN_GITHUB_LOGIN = "Bytelv"
+# 评论提醒从 Waline 拉数据（Waline 没有通用 webhook，所以用 cron 轮询）
+WALINE_URL = "https://waline.lvbyte.top"
 
 [[d1_databases]]
 binding = "DB"

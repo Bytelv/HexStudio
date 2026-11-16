@@ -12,9 +12,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val container = (application as StudioApp).container
+        // 通知栏点进来的目标页（NotificationWorker.putExtra("open", ...)）
+        val initialRoute = intent?.getStringExtra("open").orEmpty()
         setContent {
             StudioTheme {
-                StudioRoot(container)
+                StudioRoot(container, initialRoute = initialRoute)
             }
         }
     }

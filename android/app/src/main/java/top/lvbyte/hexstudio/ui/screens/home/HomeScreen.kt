@@ -187,6 +187,45 @@ fun HomeScreen(
                 }
             }
             item {
+                val stats = state.stats ?: StudioStats()
+                val likes = state.likes
+                SectionCard(title = "互动") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        MiniStat(Modifier.weight(1f), "点赞", stats.likes.toString())
+                        MiniStat(Modifier.weight(1f), "评论提醒", stats.comments.toString())
+                        MiniStat(
+                            Modifier.weight(1f),
+                            "未读提醒",
+                            stats.unreadNotifications.toString(),
+                            if (stats.unreadNotifications > 0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    if (likes != null && likes.content.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        likes.content.take(3).forEach { liked ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    liked.path.humanPath(),
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "♥ ${liked.count}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            item {
                 SectionCard(title = "发布链路") {
                     Text(
                         "文章保存后提交到 GitHub，Cloudflare Pages 自动构建；说说和友链走 Worker + D1，即时生效。",
@@ -409,5 +448,19 @@ private fun MiniStat(
     Column(modifier) {
         Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = valueColor)
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** `/posts/steam-deck-guide/` → `steam-deck-guide`，`/talks/<uuid>/` → `说说 <前8位>` */
+private fun String.humanPath(): String {
+    val cleaned = trim().trimEnd('/')
+    if (cleaned.isEmpty()) return "/"
+    val segments = cleaned.split('/').filter { it.isNotBlank() }
+    val last = segments.lastOrNull() ?: cleaned
+    return when {
+        segments.size >= 2 && segments[segments.size - 2] == "talks" ->
+            "说说 " + last.take(8)
+        last.length > 28 -> last.take(28) + "…"
+        else -> last
     }
 }

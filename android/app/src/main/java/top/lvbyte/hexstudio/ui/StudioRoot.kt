@@ -25,7 +25,7 @@ import top.lvbyte.hexstudio.ui.screens.login.LoginScreen
 import top.lvbyte.hexstudio.ui.screens.repo.RepoPickerScreen
 
 @Composable
-fun StudioRoot(container: AppContainer) {
+fun StudioRoot(container: AppContainer, initialRoute: String = "") {
     val appVm: AppViewModel = viewModel(factory = appViewModelFactory { AppViewModel(container) })
     val gate by appVm.gate.collectAsStateWithLifecycle()
     val updateVm: UpdateViewModel = viewModel(factory = appViewModelFactory { UpdateViewModel(container) })
@@ -69,7 +69,8 @@ fun StudioRoot(container: AppContainer) {
                 onLogout = { appVm.logout() },
                 onRepoChanged = { appVm.refresh() },
                 updateChecking = updateState.checking,
-                onCheckUpdate = updateVm::check
+                onCheckUpdate = updateVm::check,
+                initialRoute = initialRoute
             )
         }
         UpdateHost(

@@ -10,7 +10,7 @@
  * 运行在 Cloudflare Workers + D1。所有时间戳均为 Unix 毫秒。
  */
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const UA = 'LvbyteStudioBot/1.0 (+https://blog.lvbyte.top)';
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
@@ -495,7 +495,9 @@ async function adminStats(env) {
        (SELECT COUNT(*) FROM friend_applications WHERE status = 'pending') AS pending_applications,
        (SELECT COUNT(*) FROM notifications WHERE read = 0) AS unread_notifications,
        (SELECT COUNT(*) FROM feed_articles) AS articles,
-       (SELECT COUNT(*) FROM friends WHERE last_error IS NOT NULL) AS feed_errors`
+       (SELECT COUNT(*) FROM friends WHERE last_error IS NOT NULL) AS feed_errors,
+       (SELECT COUNT(*) FROM likes) AS likes,
+       (SELECT COUNT(*) FROM notifications WHERE type = 'comment') AS comments`
   );
   return json({
     ok: true,
@@ -506,6 +508,8 @@ async function adminStats(env) {
       unread_notifications: Number(row?.unread_notifications || 0),
       articles: Number(row?.articles || 0),
       feed_errors: Number(row?.feed_errors || 0),
+      likes: Number(row?.likes || 0),
+      comments: Number(row?.comments || 0),
     },
   });
 }
@@ -1839,6 +1843,193 @@ async function manualFeedRefresh(request, env) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 点赞（公开接口）                                                     */
+/* ------------------------------------------------------------------ */
+
+const VISITOR_RE = /^[A-Za-z0-9_-]{8,64}$/;
+const LIKE_MAX_PATHS = 50;
+const LIKE_DAILY_CAP = 300;
+
+function normalizePath(value) {
+  const path = clampStr(value, 300);
+  if (!path || path[0] !== '/') return '';
+  return path;
+}
+
+async function likeCounts(request, env) {
+  const url = new URL(request.url);
+  const raw = url.searchParams.get('paths') || url.searchParams.get('path') || '';
+  const paths = raw.split(',').map(normalizePath).filter(Boolean).slice(0, LIKE_MAX_PATHS);
+  const counts = {};
+  paths.forEach((p) => { counts[p] = 0; });
+  if (!paths.length) return json({ ok: true, counts }, 200, { 'Cache-Control': 'no-store' });
+  const placeholders = paths.map(() => '?').join(',');
+  const rows = await dbAll(
+    env,
+    `SELECT path, COUNT(*) AS n FROM likes WHERE path IN (${placeholders}) GROUP BY path`,
+    ...paths
+  );
+  rows.forEach((r) => { counts[r.path] = Number(r.n || 0); });
+  return json({ ok: true, counts }, 200, { 'Cache-Control': 'public, max-age=30' });
+}
+
+async function toggleLike(request, env) {
+  const body = await readJson(request);
+  const path = normalizePath(body.path);
+  const visitor = clampStr(body.visitor, 64);
+  const action = body.action === 'unlike' ? 'unlike' : 'like';
+  if (!path) throw new HttpError(400, '缺少 path');
+  if (!VISITOR_RE.test(visitor)) throw new HttpError(400, 'visitor 不合法');
+
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const ipHash = await sha256Hex(`${ip}|${env.IP_SALT || 'lvbyte-studio'}|like`);
+  const t = now();
+
+  if (action === 'like') {
+    const since = t - 24 * 60 * 60 * 1000;
+    const recent = await dbFirst(
+      env,
+      'SELECT COUNT(*) AS n FROM likes WHERE ip_hash = ? AND created_at > ?',
+      ipHash,
+      since
+    );
+    if (Number(recent?.n || 0) >= LIKE_DAILY_CAP) {
+      throw new HttpError(429, '今天的点赞有点多，明天再来吧');
+    }
+    await dbRun(
+      env,
+      'INSERT OR IGNORE INTO likes (path, visitor, ip_hash, created_at) VALUES (?,?,?,?)',
+      path, visitor, ipHash, t
+    );
+  } else {
+    await dbRun(env, 'DELETE FROM likes WHERE path = ? AND visitor = ?', path, visitor);
+  }
+
+  const row = await dbFirst(env, 'SELECT COUNT(*) AS n FROM likes WHERE path = ?', path);
+  const mine = await dbFirst(env, 'SELECT 1 AS hit FROM likes WHERE path = ? AND visitor = ?', path, visitor);
+  return json({ ok: true, path, count: Number(row?.n || 0), liked: !!mine });
+}
+
+async function adminLikes(request, env) {
+  const url = new URL(request.url);
+  const limit = Math.min(Math.max(toInt(url.searchParams.get('limit'), 20), 1), 100);
+  const rows = await dbAll(
+    env,
+    `SELECT path, COUNT(*) AS n, MAX(created_at) AS last_at
+       FROM likes GROUP BY path ORDER BY n DESC, last_at DESC LIMIT ?`,
+    limit
+  );
+  const totalRow = await dbFirst(env, 'SELECT COUNT(*) AS n FROM likes');
+  return json({
+    ok: true,
+    total: Number(totalRow?.n || 0),
+    content: rows.map((r) => ({
+      path: r.path,
+      count: Number(r.n || 0),
+      last_at: Number(r.last_at || 0),
+      last: formatDateCN(r.last_at, true),
+    })),
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Waline 评论提醒（cron 轮询，Waline 1.x 没有 webhook）                */
+/* ------------------------------------------------------------------ */
+
+const WALINE_SYNC_BATCH = 50;
+
+function walineBase(env) {
+  return String(env.WALINE_URL || 'https://waline.lvbyte.top').replace(/\/+$/, '');
+}
+
+function flattenComments(list, out = []) {
+  for (const item of list || []) {
+    if (!item || typeof item !== 'object') continue;
+    out.push(item);
+    if (Array.isArray(item.children)) flattenComments(item.children, out);
+  }
+  return out;
+}
+
+/**
+ * 拉 Waline 最近评论，把新出现的写进 notifications（APK 靠这张表推送提醒）。
+ * 游标存在 settings.waline_last_comment_id：
+ *   - 第一次跑（游标 0）只记基线不推送，避免把历史评论一次性全推给用户；
+ *   - 之后 objectId 比游标大的才推，回复（children）也算新评论。
+ */
+async function syncWalineComments(env) {
+  const base = walineBase(env);
+  const cursorRow = await dbFirst(
+    env,
+    "SELECT value FROM settings WHERE key = 'waline_last_comment_id'"
+  );
+  const parsed = Number(cursorRow?.value || 0);
+  const baseline = !Number.isFinite(parsed) || parsed <= 0;
+  let lastId = baseline ? 0 : parsed;
+
+  const res = await fetch(`${base}/api/comment?type=recent&count=${WALINE_SYNC_BATCH}`, {
+    headers: { Accept: 'application/json', 'User-Agent': UA },
+  });
+  if (!res.ok) return { ok: false, skipped: `HTTP ${res.status}` };
+  const body = await res.json().catch(() => null);
+  const items = flattenComments(Array.isArray(body?.data) ? body.data : []);
+
+  let maxId = lastId;
+  for (const c of items) {
+    const id = Number(c.objectId);
+    if (Number.isFinite(id) && id > maxId) maxId = id;
+  }
+
+  if (baseline) {
+    if (maxId > 0) {
+      await dbRun(
+        env,
+        "INSERT INTO settings (key, value) VALUES ('waline_last_comment_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        String(maxId)
+      );
+    }
+    return { ok: true, baseline: true, scanned: items.length, lastId: maxId };
+  }
+
+  const fresh = items
+    .filter((c) => Number(c.objectId) > lastId)
+    .filter((c) => typeof c.url === 'string' && c.url.startsWith('/'))
+    .sort((a, b) => Number(a.objectId) - Number(b.objectId));
+
+  let created = 0;
+  for (const c of fresh) {
+    const nick = clampStr(c.nick || '访客', 40) || '访客';
+    const text = clampStr(stripHtml(c.comment || ''), 200);
+    const time = Number(c.time) || now();
+    await dbRun(
+      env,
+      'INSERT INTO notifications (type, title, body, data, read, created_at) VALUES (?,?,?,?,0,?)',
+      'comment',
+      '新的评论',
+      `${nick}：${text}`,
+      JSON.stringify({
+        objectId: Number(c.objectId),
+        url: c.url,
+        nick,
+        comment: text,
+        avatar: c.avatar || '',
+      }),
+      time
+    );
+    created++;
+  }
+
+  if (maxId > lastId) {
+    await dbRun(
+      env,
+      "INSERT INTO settings (key, value) VALUES ('waline_last_comment_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      String(maxId)
+    );
+  }
+  return { ok: true, scanned: items.length, created, lastId: maxId };
+}
+
+/* ------------------------------------------------------------------ */
 /* 路由                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -1875,6 +2066,9 @@ async function handleAdmin(request, env, path, method) {
   if (path === '/admin/notifications' && method === 'GET') return adminNotifications(request, env);
   if (path === '/admin/notifications/read' && method === 'POST') return markNotifications(request, env);
 
+  if (path === '/admin/likes' && method === 'GET') return adminLikes(request, env);
+  if (path === '/admin/comments/sync' && method === 'POST') return json(await syncWalineComments(env));
+
   if (path === '/admin/feed-status' && method === 'GET') return adminFeedStatus(env);
   if (path === '/admin/feeds/refresh' && method === 'POST') return manualFeedRefresh(request, env);
   if (path === '/admin/export' && method === 'GET') return adminExport(env);
@@ -1894,7 +2088,7 @@ async function route(request, env) {
       name: 'LvbyteStudio API',
       version: VERSION,
       site: env.SITE_URL || 'https://blog.lvbyte.top',
-      endpoints: ['/health', '/friends', '/friends/apply', '/talks', '/feeds'],
+      endpoints: ['/health', '/friends', '/friends/apply', '/talks', '/feeds', '/likes'],
     });
   }
 
@@ -1908,6 +2102,8 @@ async function route(request, env) {
   if (path === '/friends/apply' && method === 'POST') return applyFriend(request, env);
   if (path === '/talks' && method === 'GET') return listTalks(request, env);
   if (path === '/feeds' && method === 'GET') return listFeeds(request, env);
+  if (path === '/likes' && method === 'GET') return likeCounts(request, env);
+  if (path === '/likes' && method === 'POST') return toggleLike(request, env);
   if (path === '/auth/github' && method === 'POST') return handleGithubLogin(request, env);
 
   if (path.startsWith('/admin/')) return handleAdmin(request, env, path, method);
@@ -1938,10 +2134,10 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
       (async () => {
+        const minute = new Date().getUTCMinutes();
         try {
           const result = await processNextFeed(env);
           console.log('feed tick', JSON.stringify(result));
-          const minute = new Date().getUTCMinutes();
           if (minute === 0) await cleanup(env);
         } catch (e) {
           console.error('feed tick failed', e);
@@ -1954,6 +2150,15 @@ export default {
           } catch (e) {
             console.error('health tick failed', e);
             break;
+          }
+        }
+        // 评论提醒：每 5 分钟同步一次 Waline（次数少一点，省一次请求）
+        if (minute % 5 === 0) {
+          try {
+            const result = await syncWalineComments(env);
+            console.log('comment tick', JSON.stringify(result));
+          } catch (e) {
+            console.error('comment tick failed', e);
           }
         }
       })()

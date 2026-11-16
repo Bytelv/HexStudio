@@ -19,6 +19,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -55,9 +56,17 @@ fun MainNavHost(
     onLogout: () -> Unit,
     onRepoChanged: () -> Unit,
     updateChecking: Boolean,
-    onCheckUpdate: () -> Unit
+    onCheckUpdate: () -> Unit,
+    initialRoute: String = ""
 ) {
     val navController = rememberNavController()
+    // 点通知进来时直接落到对应页面（评论提醒 → 说说，友链提醒 → 友链）
+    LaunchedEffect(initialRoute) {
+        val target = initialRoute.trim()
+        if (target.isNotEmpty() && target != "home") {
+            navController.navigate(target) { launchSingleTop = true }
+        }
+    }
     val backStack by navController.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val topRoute = currentRoute?.substringBefore('?')

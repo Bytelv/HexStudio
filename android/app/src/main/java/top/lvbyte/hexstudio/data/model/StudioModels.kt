@@ -27,7 +27,24 @@ data class StudioStats(
     @SerialName("pending_applications") val pendingApplications: Int = 0,
     @SerialName("unread_notifications") val unreadNotifications: Int = 0,
     val articles: Int = 0,
-    @SerialName("feed_errors") val feedErrors: Int = 0
+    @SerialName("feed_errors") val feedErrors: Int = 0,
+    val likes: Int = 0,
+    val comments: Int = 0
+)
+
+@Serializable
+data class LikedPath(
+    val path: String,
+    val count: Int = 0,
+    @SerialName("last_at") val lastAt: Long = 0,
+    val last: String = ""
+)
+
+@Serializable
+data class LikesResponse(
+    val ok: Boolean = true,
+    val total: Int = 0,
+    val content: List<LikedPath> = emptyList()
 )
 
 @Serializable

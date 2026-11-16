@@ -6,8 +6,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 需要写权限：创建 tag / Release，并把 update.json 提交回 main
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: hexstudio-apk-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -15,8 +20,13 @@ jobs:
     defaults:
       run:
         working-directory: android
+    outputs:
+      version_name: ${{ steps.version.outputs.name }}
+      version_code: ${{ steps.version.outputs.code }}
+      signed: ${{ steps.keystore.outputs.signed }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -27,7 +37,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          # 显式跳过已下线的 legacy tools 包
+          # 显式跳过已下线的 legacy tools 包（之前 CI 就是在这一步挂的）
           packages: platform-tools
 
       - name: Install SDK platform 35
@@ -38,14 +48,134 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Build debug APK
+      # 版本号从 build.gradle.kts 读，避免 CI 和本地各写一份
+      - name: Read version
+        id: version
+        working-directory: .
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re
+          text = pathlib.Path('android/app/build.gradle.kts').read_text(encoding='utf-8')
+          name = re.search(r'versionName\s*=\s*"([^"]+)"', text).group(1)
+          code = re.search(r'versionCode\s*=\s*(\d+)', text).group(1)
+          print('versionName:', name, 'versionCode:', code)
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
+              fh.write('name=' + name + '\n')
+              fh.write('code=' + code + '\n')
+          PY
+
+      # 有签名密钥才出正式包；没有就退化成 debug 签名（只传 artifact，不发 Release）
+      - name: Prepare signing key
+        id: keystore
+        working-directory: .
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::没有配置 ANDROID_KEYSTORE_BASE64，本次用 debug 签名构建：只上传 artifact，不发布 Release（debug 签名的包覆盖不了已装的正式版）"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/hexstudio-release.jks
+          {
+            echo "storeFile=hexstudio-release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/keystore.properties
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build release APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Collect APK
+        id: apk
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/*.apk "dist/HexStudio-${{ steps.version.outputs.name }}.apk"
+          ls -lh dist
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hexstudio-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: hexstudio-${{ steps.version.outputs.name }}-apk
+          path: android/dist/*.apk
           if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.event_name != 'pull_request' && needs.build.outputs.signed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: hexstudio-${{ needs.build.outputs.version_name }}-apk
+          path: dist
+
+      - name: Publish GitHub Release
+        id: gh_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.build.outputs.version_name }}
+          name: HexStudio v${{ needs.build.outputs.version_name }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: dist/HexStudio-${{ needs.build.outputs.version_name }}.apk
+          fail_on_unmatched_files: true
+
+      # update.json 是 APK 里 UpdateChecker 读的清单；指向 Release 资源地址
+      - name: Sync update.json
+        working-directory: .
+        env:
+          VERSION_NAME: ${{ needs.build.outputs.version_name }}
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+
+          version = os.environ['VERSION_NAME']
+          code = os.environ['VERSION_CODE']
+          repo = os.environ['REPO']
+          url = 'https://github.com/' + repo + '/releases/download/v' + version + '/HexStudio-' + version + '.apk'
+
+          log = subprocess.run(
+              ['git', 'log', '-1', '--pretty=%B', 'HEAD~1' if os.environ.get('GITHUB_EVENT_NAME') == 'push' else 'HEAD'],
+              capture_output=True, text=True, check=False)
+          changelog = (log.stdout or '').strip()
+          if not changelog:
+              changelog = 'HexStudio ' + version
+
+          payload = {
+              'versionCode': int(code),
+              'versionName': version,
+              'downloadUrl': url,
+              'changelog': changelog,
+          }
+          path = pathlib.Path('update.json')
+          path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print(path.read_text(encoding='utf-8'))
+          PY
+
+      - name: Commit update.json
+        working-directory: .
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add update.json
+          if git diff --cached --quiet; then
+            echo "update.json 没有变化，跳过提交"
+            exit 0
+          fi
+          # [skip ci] 防止这次提交再触发一轮构建
+          git commit -m "chore(release): update.json -> v${{ needs.build.outputs.version_name }} [skip ci]"
+          git push

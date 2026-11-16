@@ -22,8 +22,8 @@ android {
         applicationId = "top.lvbyte.hexstudio"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.2.2"
+        versionCode = 6
+        versionName = "1.3.0"
 
         buildConfigField("String", "DEFAULT_API_BASE", "\"https://studio.4123010.xyz\"")
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"Ov23lizGC0TUk86kapjg\"")
@@ -108,3 +108,4 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }
+

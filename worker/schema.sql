@@ -93,6 +93,19 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications (read, id DESC);
 
+-- 点赞：一个人对一条路径只能点一次，(path, visitor) 做联合主键天然去重。
+-- visitor 是前端生成的匿名 id（存在 localStorage），ip_hash 只用来做防刷限额，不对外暴露。
+CREATE TABLE IF NOT EXISTS likes (
+  path TEXT NOT NULL,
+  visitor TEXT NOT NULL,
+  ip_hash TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (path, visitor)
+);
+
+CREATE INDEX IF NOT EXISTS idx_likes_path ON likes (path);
+CREATE INDEX IF NOT EXISTS idx_likes_ip ON likes (ip_hash, created_at);
+
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   github_login TEXT NOT NULL,

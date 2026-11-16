@@ -51,9 +51,11 @@ class NotificationWorker(
     private fun showNotification(items: List<top.lvbyte.hexstudio.data.model.StudioNotification>) {
         val context = applicationContext
         NotificationScheduler.ensureChannel(context)
+        // 全是评论提醒就跳说说页，否则跳友链（待审提醒在那里）
+        val target = if (items.all { it.type == "comment" }) "talks" else "friends"
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("open", "friends")
+            putExtra("open", target)
         }
         val pending = PendingIntent.getActivity(
             context,
